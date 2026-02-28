@@ -1,0 +1,35 @@
+#ifndef CH422G_H
+#define CH422G_H
+
+#include "driver/i2c_master.h"
+#include "esp_err.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// I2C Addresses for CH422G
+#define CH422G_I2C_ADDR_IO     0x24  // Base address for EXIO (8-bit)
+#define CH422G_I2C_ADDR_OC     0x38  // Open-Drain outputs (OD0-OD3)
+#define CH422G_I2C_ADDR_SET    0x48  // Config/Setting register
+
+// Specific pins for Waveshare board (EXIO range)
+#define CH422G_PIN_TP_RST      (1 << 1)
+#define CH422G_PIN_DISP        (1 << 2)
+#define CH422G_PIN_LCD_RST     (1 << 3)
+#define CH422G_PIN_SD_CS       (1 << 4)
+
+// Specific pins for Open-Drain (OD range)
+#define CH422G_PIN_DO0         (1 << 0)
+#define CH422G_PIN_DO1         (1 << 1)
+
+esp_err_t ch422g_init(i2c_master_bus_handle_t bus_handle);
+esp_err_t ch422g_write_output(uint8_t bits);
+esp_err_t ch422g_write_od(uint8_t bits);
+esp_err_t ch422g_set_config(uint8_t config);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // CH422G_H
