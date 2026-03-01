@@ -21,11 +21,15 @@ static const char *TAG = "TILES_PROTOTYPE";
 #define TP_INT_PIN           4
 
 // --- CH422G EXIO Bit Mapping (Waveshare 5-inch Board) ---
-// Note: Backlight on this specific board revision is Active LOW.
 #define CH422G_EXIO_LCD_RST  (1 << 0) // Bit 0: LCD Reset (Active LOW)
-#define CH422G_EXIO_TP_RST   (1 << 1) // Bit 1: Touch Reset (Active LOW)
-#define CH422G_EXIO_DISP     (1 << 2) // Bit 2: Display Backlight (Active LOW for ON)
 #define CH422G_EXIO_SD_CS    (1 << 4) // Bit 4: SD Card Chip Select (Active LOW)
+
+// --- CH422G OC (Open Collector) Bit Mapping ---
+// Based on working example:
+// 0x2C (Reset: TP_RST=0, DISP=1)
+// 0x2E (Normal: TP_RST=1, DISP=1)
+#define CH422G_OC_TP_RST     (1 << 1) // Bit 1: Touch Reset
+#define CH422G_OC_DISP       (1 << 2) // Bit 2: Display Backlight
 
 // --- RGB LCD Settings (800x480) ---
 #define LCD_H_RES            800
@@ -91,42 +95,37 @@ void hardware_init(void) {
     // CH422G IO Expander Initialization
     ESP_LOGI(TAG, "Initializing CH422G...");
     ESP_ERROR_CHECK(ch422g_init(i2c_bus));
-    ESP_ERROR_CHECK(ch422g_set_config(0x05)); // Enable both EXIO and OC outputs
+    // User's code uses 0x01 for SET. My driver defaults to 0x05 (IO + OC enabled).
+    // We'll stick to 0x01 if OC works with it, or keep 0x05.
+    ESP_ERROR_CHECK(ch422g_set_config(0x01));
 
     // Reset and Backlight Control
     ESP_LOGI(TAG, "Resetting Display and Touch...");
 
-    // Initial State: Backlight ON (DISP=0), SD Deselected (CS=1), Reset lines active (0)
-    uint8_t exio_val = CH422G_EXIO_SD_CS;
-    ch422g_write_output(exio_val);
-    ch422g_write_od(0x00);
+    // 1. Initial State for EXIO: LCD_RST Active (0), SD_CS Inactive (1)
+    ch422g_write_output(CH422G_EXIO_SD_CS);
+
+    // 2. Initial State for OC: 0x2C (TP_RST=0, DISP=1)
+    ch422g_write_od(0x2C);
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    // Release LCD Reset
-    exio_val |= CH422G_EXIO_LCD_RST;
-    ch422g_write_output(exio_val);
+    // 3. Release LCD Reset (EXIO Bit 0)
+    ch422g_write_output(CH422G_EXIO_SD_CS | CH422G_EXIO_LCD_RST);
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    // GT911 Reset Sequence for Address 0x5D
+    // 4. GT911 Reset Sequence for Address 0x5D
     ESP_LOGI(TAG, "GT911 Reset Sequence...");
     gpio_config_t io_conf = {
         .intr_type = GPIO_INTR_DISABLE,
         .mode = GPIO_MODE_OUTPUT,
         .pin_bit_mask = (1ULL << TP_INT_PIN),
-        .pull_down_en = 0,
-        .pull_up_en = 0,
     };
     gpio_config(&io_conf);
     gpio_set_level(TP_INT_PIN, 0);
-
-    exio_val &= ~CH422G_EXIO_TP_RST; // TP_RST LOW
-    ch422g_write_output(exio_val);
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    exio_val |= CH422G_EXIO_TP_RST; // TP_RST HIGH
-    ch422g_write_output(exio_val);
-    vTaskDelay(pdMS_TO_TICKS(10));
-    // After address selection, we can let the driver take over the INT pin later.
+    // Release Touch Reset (OC Bit 1) -> 0x2E
+    ch422g_write_od(0x2E);
     vTaskDelay(pdMS_TO_TICKS(200));
 
     // RGB LCD Initialization
@@ -179,7 +178,7 @@ void hardware_init(void) {
     const esp_lcd_touch_config_t tp_cfg = {
         .x_max = LCD_H_RES,
         .y_max = LCD_V_RES,
-        .rst_gpio_num = -1, // Managed via CH422G
+        .rst_gpio_num = -1, // Managed via CH422G OC
         .int_gpio_num = TP_INT_PIN,
         .driver_data = &tp_gt911_config,
         .levels = {
