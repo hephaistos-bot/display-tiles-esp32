@@ -42,11 +42,11 @@ static const char *TAG = "TILES_PROTOTYPE";
 #define LCD_PIN_G5           48
 #define LCD_PIN_G6           47
 #define LCD_PIN_G7           21
-#define LCD_PIN_B3           6
-#define LCD_PIN_B4           10
-#define LCD_PIN_B5           14
+#define LCD_PIN_B3           14
+#define LCD_PIN_B4           38
+#define LCD_PIN_B5           18
 #define LCD_PIN_B6           17
-#define LCD_PIN_B7           18
+#define LCD_PIN_B7           10
 #define LCD_PIN_PCLK         7
 #define LCD_PIN_HSYNC        46
 #define LCD_PIN_VSYNC        3
@@ -93,45 +93,28 @@ void hardware_init(void) {
     };
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_conf, &i2c_bus));
 
-    // I2C Bus Scan
-    ESP_LOGI(TAG, "Scanning I2C Bus for devices...");
-    for (int addr = 0x01; addr < 0x7F; addr++) {
-        esp_err_t res = i2c_master_probe(i2c_bus, addr, 100);
-        if (res == ESP_OK) {
-            ESP_LOGI(TAG, "Found device at I2C address 0x%02X", addr);
-        }
-    }
-
     // CH422G Init
     ESP_LOGI(TAG, "Initializing CH422G IO Expander...");
     ESP_ERROR_CHECK(ch422g_init(i2c_bus));
-    ESP_ERROR_CHECK(ch422g_set_config(0x05)); // Enable IO/OC
-
-    // CH422G Blinker Test (Diagnostic)
-    ESP_LOGI(TAG, "Performing 5s backlight blinking test (toggling all EXIO/OC bits)...");
-    for (int i = 0; i < 5; i++) {
-        ESP_LOGI(TAG, "Blink iteration %d: ON (0xFF)", i);
-        ch422g_write_output(0xFF);
-        ch422g_write_od(0xFF);
-        vTaskDelay(pdMS_TO_TICKS(500));
-
-        ESP_LOGI(TAG, "Blink iteration %d: OFF (0x00)", i);
-        ch422g_write_output(0x00);
-        ch422g_write_od(0x00);
-        vTaskDelay(pdMS_TO_TICKS(500));
-    }
+    ESP_ERROR_CHECK(ch422g_set_config(0x01)); // Enable IO (Disable OC to avoid conflict)
 
     // LCD Reset via CH422G
-    ESP_LOGI(TAG, "Applying explicit LCD reset pulse...");
-    // Pulse Bit 0 (LCD_RST) LOW
-    ch422g_write_output(0xFE);
-    vTaskDelay(pdMS_TO_TICKS(100));
+    ESP_LOGI(TAG, "Applying explicit LCD reset sequence...");
 
-    // Set all EXIO and OC to HIGH (Enables Backlight and takes LCD out of reset)
-    ESP_LOGI(TAG, "Enabling backlight and taking LCD out of reset...");
-    ch422_exio_bits = 0xFF;
-    ESP_ERROR_CHECK(ch422g_write_output(ch422_exio_bits));
-    ESP_ERROR_CHECK(ch422g_write_od(0xFF)); // Some boards use OC for DISP
+    // 1. All LOW (Reset LOW, DISP LOW, SD_CS LOW)
+    ch422g_write_output(0x00);
+    vTaskDelay(pdMS_TO_TICKS(200));
+
+    // 2. Take LCD out of reset (LCD_RST = HIGH), Keep DISP LOW, SD_CS HIGH (inactive)
+    // Bits: SD_CS(4)=1, DISP(2)=0, TP_RST(1)=1, LCD_RST(0)=1 -> 0x13
+    ch422_exio_bits = CH422G_PIN_LCD_RST | CH422G_PIN_TP_RST | CH422G_PIN_SD_CS;
+    ch422g_write_output(ch422_exio_bits);
+    vTaskDelay(pdMS_TO_TICKS(200));
+
+    // 3. Enable Backlight (DISP = HIGH)
+    ESP_LOGI(TAG, "Enabling backlight (Pin 2 HIGH)...");
+    ch422_exio_bits |= CH422G_PIN_DISP;
+    ch422g_write_output(ch422_exio_bits);
     vTaskDelay(pdMS_TO_TICKS(500));
 
     // RGB LCD Init
@@ -150,7 +133,7 @@ void hardware_init(void) {
             LCD_PIN_R3, LCD_PIN_R4, LCD_PIN_R5, LCD_PIN_R6, LCD_PIN_R7,
         },
         .timings = {
-            .pclk_hz = 18 * 1000 * 1000,
+            .pclk_hz = LCD_PIXEL_CLOCK_HZ,
             .h_res = LCD_H_RES,
             .v_res = LCD_V_RES,
             .hsync_back_porch = 40,
