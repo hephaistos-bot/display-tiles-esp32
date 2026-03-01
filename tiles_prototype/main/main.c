@@ -93,6 +93,13 @@ void hardware_init(void) {
     // CH422G Init
     ESP_ERROR_CHECK(ch422g_init(i2c_bus));
 
+    ESP_LOGI(TAG, "Scanning I2C bus...");
+    for (int i = 1; i < 127; i++) {
+        if (i2c_master_probe(i2c_bus, i, -1) == ESP_OK) {
+            ESP_LOGI(TAG, "Found I2C device at 0x%02X", i);
+        }
+    }
+
     // Initial GT911 I2C address selection via reset sequence
     // TP_IRQ low during reset sets address to 0x5D
     gpio_config_t irq_conf = {
@@ -104,14 +111,22 @@ void hardware_init(void) {
     gpio_config(&irq_conf);
     gpio_set_level(TP_IRQ_PIN, 0);
 
-    // Reset sequence
-    ch422_exio_bits = 0;
-    ch422g_write_output(ch422_exio_bits);
-    vTaskDelay(pdMS_TO_TICKS(50));
+    // Reset sequence: TP_RST low, TP_IRQ low
+    ch422_exio_bits &= ~CH422G_PIN_TP_RST;
+    ESP_ERROR_CHECK(ch422g_write_output(ch422_exio_bits));
+    vTaskDelay(pdMS_TO_TICKS(10));
 
-    ch422_exio_bits = CH422G_PIN_TP_RST | CH422G_PIN_LCD_RST | CH422G_PIN_DISP | CH422G_PIN_SD_CS;
-    ch422g_write_output(ch422_exio_bits);
-    vTaskDelay(pdMS_TO_TICKS(100));
+    // Release reset: TP_RST high, keep TP_IRQ low for another 5ms
+    ch422_exio_bits |= CH422G_PIN_TP_RST | CH422G_PIN_LCD_RST | CH422G_PIN_DISP | CH422G_PIN_SD_CS;
+    ESP_ERROR_CHECK(ch422g_write_output(ch422_exio_bits));
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    ESP_LOGI(TAG, "Scanning I2C bus after GT911 reset...");
+    for (int i = 1; i < 127; i++) {
+        if (i2c_master_probe(i2c_bus, i, -1) == ESP_OK) {
+            ESP_LOGI(TAG, "Found I2C device at 0x%02X", i);
+        }
+    }
 
     // Reconfigure TP_IRQ as input for interrupts
     irq_conf.mode = GPIO_MODE_INPUT;
@@ -168,7 +183,7 @@ void hardware_init(void) {
     };
     esp_lcd_panel_io_i2c_config_t tp_io_conf = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
     tp_io_conf.dev_addr = 0x5D;
-    tp_io_conf.scl_speed_hz = 400000;
+    tp_io_conf.scl_speed_hz = 100000;
     esp_lcd_panel_io_handle_t tp_io_handle = NULL;
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_bus, &tp_io_conf, &tp_io_handle));
 
