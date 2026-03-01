@@ -166,7 +166,12 @@ void sd_card_test(void) {
     slot_config.gpio_cs = -1; // Manual control
     slot_config.host_id = host.slot;
 
-    // Manually pull SD_CS low
+    // Ensure SD_CS is high before starting (inactive)
+    ch422_exio_bits |= CH422G_PIN_SD_CS;
+    ch422g_write_output(ch422_exio_bits);
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    // Manually pull SD_CS low (active)
     ch422_exio_bits &= ~CH422G_PIN_SD_CS;
     ch422g_write_output(ch422_exio_bits);
 
