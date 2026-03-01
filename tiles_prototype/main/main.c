@@ -80,6 +80,8 @@ void app_main(void) {
 }
 
 void hardware_init(void) {
+    vTaskDelay(pdMS_TO_TICKS(500)); // Initial power stability delay
+
     // I2C Init
     i2c_master_bus_config_t i2c_bus_conf = {
         .clk_source = I2C_CLK_SRC_DEFAULT,
@@ -94,15 +96,7 @@ void hardware_init(void) {
     // CH422G Init
     ESP_ERROR_CHECK(ch422g_init(i2c_bus));
 
-    ESP_LOGI(TAG, "Scanning I2C bus...");
-    for (int i = 1; i < 127; i++) {
-        if (i2c_master_probe(i2c_bus, i, 20) == ESP_OK) {
-            ESP_LOGI(TAG, "Found I2C device at 0x%02X", i);
-        }
-    }
-
     // Initial GT911 I2C address selection via reset sequence
-    // TP_IRQ low during reset sets address to 0x5D
     gpio_config_t irq_conf = {
         .pin_bit_mask = (1ULL << TP_IRQ_PIN),
         .mode = GPIO_MODE_OUTPUT,
@@ -110,33 +104,32 @@ void hardware_init(void) {
         .pull_down_en = 0,
     };
     gpio_config(&irq_conf);
-
-    // GT911 Reset Sequence
-    // 1. Force INT low and RST low
     gpio_set_level(TP_IRQ_PIN, 0);
+
+    // Reset sequence: TP_RST low (100ms) -> TP_RST high (100ms) -> Wait (200ms)
     ch422_exio_bits = CH422G_PIN_LCD_RST | CH422G_PIN_DISP | CH422G_PIN_SD_CS; // TP_RST low
     ESP_ERROR_CHECK(ch422g_write_output(ch422_exio_bits));
-    vTaskDelay(pdMS_TO_TICKS(20));
+    vTaskDelay(pdMS_TO_TICKS(100));
 
-    // 2. Release RST high, keep INT low for 5ms
     ch422_exio_bits |= CH422G_PIN_TP_RST;
     ESP_ERROR_CHECK(ch422g_write_output(ch422_exio_bits));
-    vTaskDelay(pdMS_TO_TICKS(5));
+    vTaskDelay(pdMS_TO_TICKS(100));
 
-    // 3. Reconfigure TP_IRQ as input
     irq_conf.mode = GPIO_MODE_INPUT;
     irq_conf.pull_up_en = 1;
     gpio_config(&irq_conf);
-    vTaskDelay(pdMS_TO_TICKS(50));
+    vTaskDelay(pdMS_TO_TICKS(200));
 
-    ESP_LOGI(TAG, "Scanning I2C bus after GT911 reset...");
     uint8_t tp_addr = 0x5D;
-    for (int i = 1; i < 127; i++) {
-        if (i2c_master_probe(i2c_bus, i, 20) == ESP_OK) {
-            ESP_LOGI(TAG, "Found I2C device at 0x%02X", i);
-            if (i == 0x5D) tp_addr = 0x5D;
-            if (i == 0x14) tp_addr = 0x14;
-        }
+    ESP_LOGI(TAG, "Probing for GT911...");
+    if (i2c_master_probe(i2c_bus, 0x5D, 20) == ESP_OK) {
+        tp_addr = 0x5D;
+        ESP_LOGI(TAG, "GT911 found at 0x5D");
+    } else if (i2c_master_probe(i2c_bus, 0x14, 20) == ESP_OK) {
+        tp_addr = 0x14;
+        ESP_LOGI(TAG, "GT911 found at 0x14");
+    } else {
+        ESP_LOGE(TAG, "GT911 NOT FOUND on I2C bus!");
     }
 
     // RGB LCD Init
@@ -189,7 +182,7 @@ void hardware_init(void) {
     };
     esp_lcd_panel_io_i2c_config_t tp_io_conf = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
     tp_io_conf.dev_addr = tp_addr;
-    tp_io_conf.scl_speed_hz = 400000;
+    tp_io_conf.scl_speed_hz = 100000; // Use 100kHz for initial setup
     esp_lcd_panel_io_handle_t tp_io_handle = NULL;
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_bus, &tp_io_conf, &tp_io_handle));
 
