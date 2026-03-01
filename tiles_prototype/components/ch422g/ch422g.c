@@ -35,6 +35,11 @@ esp_err_t ch422g_write_output(uint8_t bits) {
     return i2c_master_transmit(ch422_dev_handle_io, &bits, 1, 100);
 }
 
+esp_err_t ch422g_read_input(uint8_t *bits) {
+    if (ch422_dev_handle_io == NULL) return ESP_ERR_INVALID_STATE;
+    return i2c_master_receive(ch422_dev_handle_io, bits, 1, 100);
+}
+
 esp_err_t ch422g_write_od(uint8_t bits) {
     if (ch422_dev_handle_od == NULL) return ESP_ERR_INVALID_STATE;
     return i2c_master_transmit(ch422_dev_handle_od, &bits, 1, 100);

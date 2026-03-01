@@ -25,6 +25,7 @@ extern "C" {
 
 esp_err_t ch422g_init(i2c_master_bus_handle_t bus_handle);
 esp_err_t ch422g_write_output(uint8_t bits);
+esp_err_t ch422g_read_input(uint8_t *bits);
 esp_err_t ch422g_write_od(uint8_t bits);
 esp_err_t ch422g_set_config(uint8_t config);
 
