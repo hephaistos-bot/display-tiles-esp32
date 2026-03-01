@@ -48,7 +48,7 @@ i2c_master_bus_handle_t i2c_bus = NULL;
 esp_lcd_panel_handle_t lcd_panel = NULL;
 
 void app_main(void) {
-    ESP_LOGI(TAG, "Starting Display Test (Backlight Active LOW)...");
+    ESP_LOGI(TAG, "Starting Minimal Screen Test (Working Backlight)...");
     vTaskDelay(pdMS_TO_TICKS(1500));
 
     // 1. I2C Init
@@ -70,20 +70,10 @@ void app_main(void) {
     ch422g_init(i2c_bus);
     ch422g_set_config(0x05); // Enable EXIO and OC
 
-    // BACKLIGHT ON (Confirmed 0x00 turns it ON)
-    ESP_LOGI(TAG, "Enabling backlight (EXIO=0x00, OC=0x00)...");
-    ch422g_write_od(0x00);
-
-    // RESET LCD: Bit 0 is LCD_RST (Active LOW). We need a transition LOW->HIGH
-    // Start LOW (Reset active)
+    // BACKLIGHT ON (0x00 turns it ON and keeps LCD out of Reset on some boards)
+    ESP_LOGI(TAG, "Enabling backlight and taking LCD out of reset (EXIO=0x00)...");
     ch422g_write_output(0x00);
-    vTaskDelay(pdMS_TO_TICKS(200));
-
-    // Finish Reset: Take LCD_RST (Bit 0) and TP_RST (Bit 1) HIGH. Also SD_CS (Bit 4) HIGH.
-    // Bits: 0001 0011 -> 0x13
-    // DISP (Bit 2) remains LOW (ON)
-    ESP_LOGI(TAG, "Taking LCD out of reset (EXIO=0x13)...");
-    ch422g_write_output(0x13);
+    ch422g_write_od(0x00);
     vTaskDelay(pdMS_TO_TICKS(500));
 
     // 3. RGB LCD Init
