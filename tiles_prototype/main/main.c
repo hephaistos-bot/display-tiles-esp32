@@ -121,7 +121,6 @@ void hardware_init(void) {
     // RGB LCD Init
     esp_lcd_rgb_panel_config_t panel_conf = {
         .data_width = 16,
-        .psram_trans_align = 64,
         .clk_src = LCD_CLK_SRC_DEFAULT,
         .disp_gpio_num = -1,
         .pclk_gpio_num = LCD_PIN_PCLK,
@@ -167,13 +166,12 @@ void hardware_init(void) {
             .mirror_y = 0,
         },
     };
-    i2c_device_config_t tp_i2c_dev_conf = {
-        .dev_addr = 0x5D,
-        .scl_speed_hz = 400000,
-    };
-    i2c_master_dev_handle_t tp_i2c_handle;
-    ESP_ERROR_CHECK(i2c_master_bus_add_device(i2c_bus, &tp_i2c_dev_conf, &tp_i2c_handle));
-    ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_gt911(tp_i2c_handle, &tp_conf, &tp_handle));
+    esp_lcd_panel_io_i2c_config_t tp_io_conf = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
+    tp_io_conf.dev_addr = 0x5D;
+    esp_lcd_panel_io_handle_t tp_io_handle = NULL;
+    ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_bus, &tp_io_conf, &tp_io_handle));
+
+    ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_gt911(tp_io_handle, &tp_conf, &tp_handle));
 }
 
 void sd_card_test(void) {
@@ -197,7 +195,7 @@ void sd_card_test(void) {
         .quadhd_io_num = -1,
         .max_transfer_sz = 4000,
     };
-    ESP_ERROR_CHECK(spi_bus_initialize(host.slot, &bus_cfg, SDSPI_DEFAULT_DMACHAN));
+    ESP_ERROR_CHECK(spi_bus_initialize(host.slot, &bus_cfg, SPI_DMA_CH_AUTO));
 
     sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
     slot_config.gpio_cs = -1; // Manual control
@@ -230,9 +228,9 @@ void lvgl_touch_cb(lv_indev_t *indev, lv_indev_data_t *data) {
     uint8_t touch_cnt = 0;
 
     esp_lcd_touch_read_data(tp_handle);
-    bool pressed = esp_lcd_touch_get_coordinates(tp_handle, touch_x, touch_y, touch_strength, &touch_cnt, 1);
+    esp_err_t ret = esp_lcd_touch_get_data(tp_handle, touch_x, touch_y, touch_strength, &touch_cnt, 1);
 
-    if (pressed && touch_cnt > 0) {
+    if (ret == ESP_OK && touch_cnt > 0) {
         data->point.x = touch_x[0];
         data->point.y = touch_y[0];
         data->state = LV_INDEV_STATE_PRESSED;
