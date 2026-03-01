@@ -168,6 +168,7 @@ void hardware_init(void) {
     };
     esp_lcd_panel_io_i2c_config_t tp_io_conf = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
     tp_io_conf.dev_addr = 0x5D;
+    tp_io_conf.scl_speed_hz = 400000;
     esp_lcd_panel_io_handle_t tp_io_handle = NULL;
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_bus, &tp_io_conf, &tp_io_handle));
 
@@ -201,7 +202,12 @@ void sd_card_test(void) {
     slot_config.gpio_cs = -1; // Manual control
     slot_config.host_id = host.slot;
 
-    // Manually pull SD_CS low
+    // Ensure SD_CS is high before starting (inactive)
+    ch422_exio_bits |= CH422G_PIN_SD_CS;
+    ch422g_write_output(ch422_exio_bits);
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    // Manually pull SD_CS low (active)
     ch422_exio_bits &= ~CH422G_PIN_SD_CS;
     ch422g_write_output(ch422_exio_bits);
 
