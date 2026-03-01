@@ -42,11 +42,11 @@ static const char *TAG = "TILES_PROTOTYPE";
 #define LCD_PIN_G5           48
 #define LCD_PIN_G6           47
 #define LCD_PIN_G7           21
-#define LCD_PIN_B3           14
-#define LCD_PIN_B4           38
-#define LCD_PIN_B5           18
+#define LCD_PIN_B3           6
+#define LCD_PIN_B4           10
+#define LCD_PIN_B5           14
 #define LCD_PIN_B6           17
-#define LCD_PIN_B7           10
+#define LCD_PIN_B7           18
 #define LCD_PIN_PCLK         7
 #define LCD_PIN_HSYNC        46
 #define LCD_PIN_VSYNC        3
@@ -122,11 +122,17 @@ void hardware_init(void) {
     }
 
     // LCD Reset via CH422G
-    ESP_LOGI(TAG, "Resetting LCD and enabling backlight...");
-    // Final state: LCD_RST, TP_RST, DISP, EXIO3, SD_CS all HIGH
+    ESP_LOGI(TAG, "Applying explicit LCD reset pulse...");
+    // Pulse Bit 0 (LCD_RST) LOW
+    ch422g_write_output(0xFE);
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    // Set all EXIO and OC to HIGH (Enables Backlight and takes LCD out of reset)
+    ESP_LOGI(TAG, "Enabling backlight and taking LCD out of reset...");
     ch422_exio_bits = 0xFF;
     ESP_ERROR_CHECK(ch422g_write_output(ch422_exio_bits));
-    vTaskDelay(pdMS_TO_TICKS(500)); // Longer delay for stabilization
+    ESP_ERROR_CHECK(ch422g_write_od(0xFF)); // Some boards use OC for DISP
+    vTaskDelay(pdMS_TO_TICKS(500));
 
     // RGB LCD Init
     ESP_LOGI(TAG, "Initializing RGB LCD Panel...");
@@ -144,7 +150,7 @@ void hardware_init(void) {
             LCD_PIN_R3, LCD_PIN_R4, LCD_PIN_R5, LCD_PIN_R6, LCD_PIN_R7,
         },
         .timings = {
-            .pclk_hz = LCD_PIXEL_CLOCK_HZ,
+            .pclk_hz = 18 * 1000 * 1000,
             .h_res = LCD_H_RES,
             .v_res = LCD_V_RES,
             .hsync_back_porch = 40,
@@ -165,13 +171,14 @@ void hardware_init(void) {
 
     // Simple RED Screen Fill Test
     ESP_LOGI(TAG, "Performing hardware color fill test (RED)...");
-    uint16_t *test_buf = (uint16_t *)heap_caps_malloc(LCD_H_RES * 40 * sizeof(uint16_t), MALLOC_CAP_SPIRAM);
+    // Use a small buffer in internal RAM to be safe
+    uint16_t *test_buf = (uint16_t *)heap_caps_malloc(LCD_H_RES * 20 * sizeof(uint16_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (test_buf) {
-        for (int i = 0; i < LCD_H_RES * 40; i++) {
+        for (int i = 0; i < LCD_H_RES * 20; i++) {
             test_buf[i] = 0xF800; // Red in RGB565
         }
-        for (int y = 0; y < LCD_V_RES; y += 40) {
-            esp_lcd_panel_draw_bitmap(lcd_panel, 0, y, LCD_H_RES, y + 40, test_buf);
+        for (int y = 0; y < LCD_V_RES; y += 20) {
+            esp_lcd_panel_draw_bitmap(lcd_panel, 0, y, LCD_H_RES, y + 20, test_buf);
         }
         heap_caps_free(test_buf);
         ESP_LOGI(TAG, "Hardware color fill test complete.");
