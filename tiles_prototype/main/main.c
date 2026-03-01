@@ -6,6 +6,7 @@
 #include "esp_timer.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_rgb.h"
+#include "esp_lcd_touch_gt911.h"
 #include "driver/i2c_master.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -17,6 +18,7 @@ static const char *TAG = "TILES_PROTOTYPE";
 // --- Hardware Pins ---
 #define I2C_SDA_PIN          8
 #define I2C_SCL_PIN          9
+#define TP_INT_PIN           4
 
 // --- CH422G EXIO Bit Mapping (Waveshare 5-inch Board) ---
 // Note: Backlight on this specific board revision is Active LOW.
@@ -55,13 +57,14 @@ static const char *TAG = "TILES_PROTOTYPE";
 // Global Handles
 i2c_master_bus_handle_t i2c_bus = NULL;
 esp_lcd_panel_handle_t lcd_panel = NULL;
+esp_lcd_touch_handle_t tp_handle = NULL;
 SemaphoreHandle_t lvgl_mux = NULL;
 
 void hardware_init(void);
 void lvgl_init_task(void *arg);
 
 void app_main(void) {
-    // 1. Initialize core hardware (I2C, CH422G, LCD)
+    // 1. Initialize core hardware (I2C, CH422G, LCD, Touch)
     hardware_init();
 
     // 2. Setup LVGL Synchronization and Task
@@ -90,13 +93,41 @@ void hardware_init(void) {
     ESP_ERROR_CHECK(ch422g_init(i2c_bus));
     ESP_ERROR_CHECK(ch422g_set_config(0x05)); // Enable both EXIO and OC outputs
 
-    // Backlight and Reset control
-    // On this board, setting the bits to 0 turns the backlight ON.
-    // We keep all EXIO bits low (0x00) for initial bringup.
-    ESP_LOGI(TAG, "Enabling Backlight (EXIO=0x00)...");
-    ch422g_write_output(0x00);
+    // Reset and Backlight Control
+    ESP_LOGI(TAG, "Resetting Display and Touch...");
+
+    // Initial State: Backlight ON (DISP=0), SD Deselected (CS=1), Reset lines active (0)
+    uint8_t exio_val = CH422G_EXIO_SD_CS;
+    ch422g_write_output(exio_val);
     ch422g_write_od(0x00);
-    vTaskDelay(pdMS_TO_TICKS(500));
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    // Release LCD Reset
+    exio_val |= CH422G_EXIO_LCD_RST;
+    ch422g_write_output(exio_val);
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    // GT911 Reset Sequence for Address 0x5D
+    ESP_LOGI(TAG, "GT911 Reset Sequence...");
+    gpio_config_t io_conf = {
+        .intr_type = GPIO_INTR_DISABLE,
+        .mode = GPIO_MODE_OUTPUT,
+        .pin_bit_mask = (1ULL << TP_INT_PIN),
+        .pull_down_en = 0,
+        .pull_up_en = 0,
+    };
+    gpio_config(&io_conf);
+    gpio_set_level(TP_INT_PIN, 0);
+
+    exio_val &= ~CH422G_EXIO_TP_RST; // TP_RST LOW
+    ch422g_write_output(exio_val);
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    exio_val |= CH422G_EXIO_TP_RST; // TP_RST HIGH
+    ch422g_write_output(exio_val);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    // After address selection, we can let the driver take over the INT pin later.
+    vTaskDelay(pdMS_TO_TICKS(200));
 
     // RGB LCD Initialization
     ESP_LOGI(TAG, "Initializing RGB LCD Panel...");
@@ -125,23 +156,76 @@ void hardware_init(void) {
             .vsync_pulse_width = 4,
             .flags.pclk_active_neg = 1,
         },
-        .flags.fb_in_psram = 1, // Store frame buffer in PSRAM
+        .flags.fb_in_psram = 1,
     };
     ESP_ERROR_CHECK(esp_lcd_new_rgb_panel(&panel_conf, &lcd_panel));
     ESP_ERROR_CHECK(esp_lcd_panel_reset(lcd_panel));
     ESP_ERROR_CHECK(esp_lcd_panel_init(lcd_panel));
     ESP_LOGI(TAG, "LCD RGB panel initialized successfully.");
+
+    // GT911 Initialization
+    ESP_LOGI(TAG, "Initializing GT911 Touch Controller...");
+    esp_lcd_panel_io_i2c_config_t tp_io_config = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
+    tp_io_config.dev_addr = 0x5D;
+    tp_io_config.scl_speed_hz = 400000;
+
+    esp_lcd_panel_io_handle_t tp_io_handle = NULL;
+    ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_bus, &tp_io_config, &tp_io_handle));
+
+    static esp_lcd_touch_io_gt911_config_t tp_gt911_config = {
+        .dev_addr = 0x5D,
+    };
+
+    const esp_lcd_touch_config_t tp_cfg = {
+        .x_max = LCD_H_RES,
+        .y_max = LCD_V_RES,
+        .rst_gpio_num = -1, // Managed via CH422G
+        .int_gpio_num = TP_INT_PIN,
+        .driver_data = &tp_gt911_config,
+        .levels = {
+            .reset = 0,
+            .interrupt = 0,
+        },
+        .flags = {
+            .swap_xy = 0,
+            .mirror_x = 0,
+            .mirror_y = 0,
+        },
+    };
+    ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_gt911(tp_io_handle, &tp_cfg, &tp_handle));
 }
 
-// LVGL Flush Callback: Pushes the rendered buffer to the LCD panel
+// LVGL Flush Callback
 void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
     esp_lcd_panel_draw_bitmap(lcd_panel, area->x1, area->y1, area->x2 + 1, area->y2 + 1, px_map);
     lv_display_flush_ready(disp);
 }
 
-// LVGL Tick Callback: Provides time measurements to LVGL
+// LVGL Tick Callback
 static uint32_t lvgl_tick_cb(void) {
     return esp_timer_get_time() / 1000;
+}
+
+// LVGL Touch Read Callback
+static void lvgl_touch_read_cb(lv_indev_t * indev, lv_indev_data_t * data) {
+    esp_lcd_touch_handle_t tp = (esp_lcd_touch_handle_t)lv_indev_get_user_data(indev);
+    if (!tp) {
+        data->state = LV_INDEV_STATE_RELEASED;
+        return;
+    }
+
+    uint8_t point_cnt = 0;
+    esp_lcd_touch_point_data_t pt;
+
+    if (esp_lcd_touch_read_data(tp) == ESP_OK) {
+        if (esp_lcd_touch_get_data(tp, &pt, &point_cnt, 1) == ESP_OK && point_cnt > 0) {
+            data->point.x = pt.x;
+            data->point.y = pt.y;
+            data->state = LV_INDEV_STATE_PRESSED;
+            return;
+        }
+    }
+    data->state = LV_INDEV_STATE_RELEASED;
 }
 
 void lvgl_init_task(void *arg) {
@@ -159,12 +243,26 @@ void lvgl_init_task(void *arg) {
     lv_display_set_buffers(disp, buf1, buf2, buffer_size * sizeof(lv_color_t), LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(disp, lvgl_flush_cb);
 
-    // Create a simple UI: "Hello World"
+    // Register Touch Input Device
+    if (tp_handle) {
+        lv_indev_t * indev = lv_indev_create();
+        lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
+        lv_indev_set_user_data(indev, tp_handle);
+        lv_indev_set_read_cb(indev, lvgl_touch_read_cb);
+    }
+
+    // Create a simple UI: "Hello World" with a button to test touch
     lv_obj_t *label = lv_label_create(lv_screen_active());
     lv_label_set_text(label, "Hello World from ESP32-S3!");
     lv_obj_set_style_text_font(label, &lv_font_montserrat_20, 0);
-    lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_align(label, LV_ALIGN_CENTER, 0, -40);
     lv_obj_set_style_text_color(label, lv_palette_main(LV_PALETTE_BLUE), 0);
+
+    lv_obj_t * btn = lv_button_create(lv_screen_active());
+    lv_obj_align(btn, LV_ALIGN_CENTER, 0, 40);
+    lv_obj_t * btn_label = lv_label_create(btn);
+    lv_label_set_text(btn_label, "Touch Me");
+    lv_obj_center(btn_label);
 
     ESP_LOGI(TAG, "LVGL initialization complete. Entering main loop...");
 
