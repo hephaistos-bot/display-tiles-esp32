@@ -95,9 +95,8 @@ void hardware_init(void) {
     // CH422G IO Expander Initialization
     ESP_LOGI(TAG, "Initializing CH422G...");
     ESP_ERROR_CHECK(ch422g_init(i2c_bus));
-    // User's code uses 0x01 for SET. My driver defaults to 0x05 (IO + OC enabled).
-    // We'll stick to 0x01 if OC works with it, or keep 0x05.
-    ESP_ERROR_CHECK(ch422g_set_config(0x01));
+    // Enable both EXIO and OC outputs (0x01 | 0x04)
+    ESP_ERROR_CHECK(ch422g_set_config(0x05));
 
     // Reset and Backlight Control
     ESP_LOGI(TAG, "Resetting Display and Touch...");
@@ -171,16 +170,11 @@ void hardware_init(void) {
     esp_lcd_panel_io_handle_t tp_io_handle = NULL;
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_bus, &tp_io_config, &tp_io_handle));
 
-    static esp_lcd_touch_io_gt911_config_t tp_gt911_config = {
-        .dev_addr = 0x5D,
-    };
-
     const esp_lcd_touch_config_t tp_cfg = {
         .x_max = LCD_H_RES,
         .y_max = LCD_V_RES,
         .rst_gpio_num = -1, // Managed via CH422G OC
         .int_gpio_num = TP_INT_PIN,
-        .driver_data = &tp_gt911_config,
         .levels = {
             .reset = 0,
             .interrupt = 0,
@@ -192,6 +186,7 @@ void hardware_init(void) {
         },
     };
     ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_gt911(tp_io_handle, &tp_cfg, &tp_handle));
+    ESP_LOGI(TAG, "Touch controller initialized successfully.");
 }
 
 // LVGL Flush Callback
@@ -221,10 +216,23 @@ static void lvgl_touch_read_cb(lv_indev_t * indev, lv_indev_data_t * data) {
             data->point.x = pt.x;
             data->point.y = pt.y;
             data->state = LV_INDEV_STATE_PRESSED;
+
+            static uint32_t last_log = 0;
+            if (lv_tick_get() - last_log > 2000) {
+                ESP_LOGI(TAG, "Touch detected at (%d, %d)", (int)pt.x, (int)pt.y);
+                last_log = lv_tick_get();
+            }
             return;
         }
     }
     data->state = LV_INDEV_STATE_RELEASED;
+}
+
+static void btn_event_cb(lv_event_t * e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if(code == LV_EVENT_CLICKED) {
+        ESP_LOGI(TAG, "Button clicked!");
+    }
 }
 
 void lvgl_init_task(void *arg) {
@@ -259,6 +267,7 @@ void lvgl_init_task(void *arg) {
 
     lv_obj_t * btn = lv_button_create(lv_screen_active());
     lv_obj_align(btn, LV_ALIGN_CENTER, 0, 40);
+    lv_obj_add_event_cb(btn, btn_event_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t * btn_label = lv_label_create(btn);
     lv_label_set_text(btn_label, "Touch Me");
     lv_obj_center(btn_label);
