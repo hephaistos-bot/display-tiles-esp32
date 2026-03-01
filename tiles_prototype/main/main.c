@@ -111,7 +111,7 @@ void hardware_init(void) {
 
     ch422_exio_bits = CH422G_PIN_TP_RST | CH422G_PIN_LCD_RST | CH422G_PIN_DISP | CH422G_PIN_SD_CS;
     ch422g_write_output(ch422_exio_bits);
-    vTaskDelay(pdMS_TO_TICKS(50));
+    vTaskDelay(pdMS_TO_TICKS(100));
 
     // Reconfigure TP_IRQ as input for interrupts
     irq_conf.mode = GPIO_MODE_INPUT;
