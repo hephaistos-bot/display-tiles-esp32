@@ -9,15 +9,15 @@ static i2c_master_dev_handle_t ch422_dev_handle_set = NULL;
 
 esp_err_t ch422g_init(i2c_master_bus_handle_t bus_handle) {
     i2c_device_config_t dev_cfg_io = {
-        .dev_addr = CH422G_I2C_ADDR_IO,
+        .device_address = CH422G_I2C_ADDR_IO,
         .scl_speed_hz = 100000,
     };
     i2c_device_config_t dev_cfg_od = {
-        .dev_addr = CH422G_I2C_ADDR_OC,
+        .device_address = CH422G_I2C_ADDR_OC,
         .scl_speed_hz = 100000,
     };
     i2c_device_config_t dev_cfg_set = {
-        .dev_addr = CH422G_I2C_ADDR_SET,
+        .device_address = CH422G_I2C_ADDR_SET,
         .scl_speed_hz = 100000,
     };
 
