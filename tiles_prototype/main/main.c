@@ -223,17 +223,19 @@ void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
 }
 
 void lvgl_touch_cb(lv_indev_t *indev, lv_indev_data_t *data) {
-    uint16_t touch_x[1], touch_y[1];
-    uint16_t touch_strength[1];
+    esp_lcd_touch_point_data_t touch_point;
     uint8_t touch_cnt = 0;
 
-    esp_lcd_touch_read_data(tp_handle);
-    esp_err_t ret = esp_lcd_touch_get_data(tp_handle, touch_x, touch_y, touch_strength, &touch_cnt, 1);
-
-    if (ret == ESP_OK && touch_cnt > 0) {
-        data->point.x = touch_x[0];
-        data->point.y = touch_y[0];
-        data->state = LV_INDEV_STATE_PRESSED;
+    esp_err_t ret = esp_lcd_touch_read_data(tp_handle);
+    if (ret == ESP_OK) {
+        ret = esp_lcd_touch_get_data(tp_handle, &touch_point, &touch_cnt, 1);
+        if (ret == ESP_OK && touch_cnt > 0) {
+            data->point.x = touch_point.x;
+            data->point.y = touch_point.y;
+            data->state = LV_INDEV_STATE_PRESSED;
+        } else {
+            data->state = LV_INDEV_STATE_RELEASED;
+        }
     } else {
         data->state = LV_INDEV_STATE_RELEASED;
     }
