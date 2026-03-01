@@ -71,7 +71,7 @@ void sd_card_test(void);
 
 void app_main(void) {
     hardware_init();
-    sd_card_test();
+    // sd_card_test(); // De-risk SD card for now
 
     lvgl_mux = xSemaphoreCreateRecursiveMutex();
     xTaskCreate(lvgl_init_task, "LVGL", 1024 * 16, NULL, 5, NULL);
@@ -93,20 +93,38 @@ void hardware_init(void) {
     };
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_conf, &i2c_bus));
 
+    // I2C Bus Scan
+    ESP_LOGI(TAG, "Scanning I2C Bus for devices...");
+    for (int addr = 0x01; addr < 0x7F; addr++) {
+        esp_err_t res = i2c_master_probe(i2c_bus, addr, 100);
+        if (res == ESP_OK) {
+            ESP_LOGI(TAG, "Found device at I2C address 0x%02X", addr);
+        }
+    }
+
     // CH422G Init
     ESP_LOGI(TAG, "Initializing CH422G IO Expander...");
     ESP_ERROR_CHECK(ch422g_init(i2c_bus));
     ESP_ERROR_CHECK(ch422g_set_config(0x05)); // Enable IO/OC
 
+    // CH422G Blinker Test (Diagnostic)
+    ESP_LOGI(TAG, "Performing 5s backlight blinking test (toggling all EXIO/OC bits)...");
+    for (int i = 0; i < 5; i++) {
+        ESP_LOGI(TAG, "Blink iteration %d: ON (0xFF)", i);
+        ch422g_write_output(0xFF);
+        ch422g_write_od(0xFF);
+        vTaskDelay(pdMS_TO_TICKS(500));
+
+        ESP_LOGI(TAG, "Blink iteration %d: OFF (0x00)", i);
+        ch422g_write_output(0x00);
+        ch422g_write_od(0x00);
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+
     // LCD Reset via CH422G
     ESP_LOGI(TAG, "Resetting LCD and enabling backlight...");
-    // Start with everything LOW except SD_CS
-    ch422_exio_bits = CH422G_PIN_SD_CS;
-    ESP_ERROR_CHECK(ch422g_write_output(ch422_exio_bits));
-    vTaskDelay(pdMS_TO_TICKS(200));
-
-    // Pull LCD_RST, TP_RST, and DISP HIGH. Also pull EXIO3 high as it might be used on some board revisions.
-    ch422_exio_bits |= CH422G_PIN_LCD_RST | CH422G_PIN_DISP | CH422G_PIN_TP_RST | (1 << 3);
+    // Final state: LCD_RST, TP_RST, DISP, EXIO3, SD_CS all HIGH
+    ch422_exio_bits = 0xFF;
     ESP_ERROR_CHECK(ch422g_write_output(ch422_exio_bits));
     vTaskDelay(pdMS_TO_TICKS(500)); // Longer delay for stabilization
 
@@ -145,12 +163,12 @@ void hardware_init(void) {
     ESP_ERROR_CHECK(esp_lcd_panel_init(lcd_panel));
     ESP_LOGI(TAG, "LCD RGB panel initialized.");
 
-    // Simple Green Screen Fill Test
-    ESP_LOGI(TAG, "Performing hardware color fill test (Green)...");
+    // Simple RED Screen Fill Test
+    ESP_LOGI(TAG, "Performing hardware color fill test (RED)...");
     uint16_t *test_buf = (uint16_t *)heap_caps_malloc(LCD_H_RES * 40 * sizeof(uint16_t), MALLOC_CAP_SPIRAM);
     if (test_buf) {
         for (int i = 0; i < LCD_H_RES * 40; i++) {
-            test_buf[i] = 0x07E0; // Green in RGB565
+            test_buf[i] = 0xF800; // Red in RGB565
         }
         for (int y = 0; y < LCD_V_RES; y += 40) {
             esp_lcd_panel_draw_bitmap(lcd_panel, 0, y, LCD_H_RES, y + 40, test_buf);
