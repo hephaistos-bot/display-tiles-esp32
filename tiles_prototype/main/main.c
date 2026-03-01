@@ -6,7 +6,6 @@
 #include "esp_timer.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_rgb.h"
-#include "esp_lcd_touch_gt911.h"
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
@@ -59,7 +58,6 @@ static const char *TAG = "TILES_PROTOTYPE";
 // Global Handles
 i2c_master_bus_handle_t i2c_bus = NULL;
 esp_lcd_panel_handle_t lcd_panel = NULL;
-esp_lcd_touch_handle_t tp_handle = NULL;
 SemaphoreHandle_t lvgl_mux = NULL;
 char sd_status_msg[64] = "SD Card: Initializing...";
 
@@ -80,10 +78,10 @@ void app_main(void) {
 }
 
 void hardware_init(void) {
-    ESP_LOGI(TAG, "[STEP 1] Initial stabilization delay (1.5s)...");
-    vTaskDelay(pdMS_TO_TICKS(1500));
+    ESP_LOGI(TAG, "Hardware stabilization...");
+    vTaskDelay(pdMS_TO_TICKS(500));
 
-    ESP_LOGI(TAG, "[STEP 2] Initializing I2C Master Bus...");
+    // I2C Init (for CH422G)
     i2c_master_bus_config_t i2c_bus_conf = {
         .clk_source = I2C_CLK_SRC_DEFAULT,
         .i2c_port = -1,
@@ -94,92 +92,18 @@ void hardware_init(void) {
     };
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_conf, &i2c_bus));
 
-    ESP_LOGI(TAG, "[STEP 3] Initializing CH422G IO Expander...");
+    // CH422G Init
     ESP_ERROR_CHECK(ch422g_init(i2c_bus));
-    ESP_ERROR_CHECK(ch422g_set_config(0x05));
+    ESP_ERROR_CHECK(ch422g_set_config(0x05)); // Enable IO/OC
 
-    uint8_t exio_val = 0;
-    ch422g_read_input(&exio_val);
-    ESP_LOGI(TAG, "[STEP 4] CH422G EXIO Initial State: 0x%02X", exio_val);
-
-    ESP_LOGI(TAG, "[STEP 5] Configuring TP_IRQ (GPIO %d) as output...", TP_IRQ_PIN);
-    gpio_config_t irq_conf = {
-        .pin_bit_mask = (1ULL << TP_IRQ_PIN),
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = 0,
-        .pull_down_en = 0,
-    };
-    ESP_ERROR_CHECK(gpio_config(&irq_conf));
-
-    ESP_LOGI(TAG, "[STEP 6] GT911/LCD Hard Reset (150ms)...");
-    ESP_ERROR_CHECK(gpio_set_level(TP_IRQ_PIN, 0));
-    ch422_exio_bits = CH422G_PIN_DISP | CH422G_PIN_SD_CS; // RST pins low
+    // LCD Reset via CH422G
+    ch422_exio_bits = CH422G_PIN_SD_CS; // All reset low, keep SD_CS high
     ESP_ERROR_CHECK(ch422g_write_output(ch422_exio_bits));
-    vTaskDelay(pdMS_TO_TICKS(150));
+    vTaskDelay(pdMS_TO_TICKS(100));
 
-    ESP_LOGI(TAG, "[STEP 7] Releasing Reset (LCD first, then Touch)...");
-    ch422_exio_bits |= CH422G_PIN_LCD_RST;
+    ch422_exio_bits |= CH422G_PIN_LCD_RST | CH422G_PIN_DISP | CH422G_PIN_TP_RST;
     ESP_ERROR_CHECK(ch422g_write_output(ch422_exio_bits));
-    vTaskDelay(pdMS_TO_TICKS(50));
-
-    ch422_exio_bits |= CH422G_PIN_TP_RST;
-    ESP_ERROR_CHECK(ch422g_write_output(ch422_exio_bits));
-    vTaskDelay(pdMS_TO_TICKS(20));
-
-    ESP_LOGI(TAG, "[STEP 8] Reconfiguring TP_IRQ as input with stabilization...");
-    irq_conf.mode = GPIO_MODE_INPUT;
-    irq_conf.pull_up_en = 1;
-    ESP_ERROR_CHECK(gpio_config(&irq_conf));
-    vTaskDelay(pdMS_TO_TICKS(300));
-
-    ESP_LOGI(TAG, "[STEP 9] Exhaustive GT911 Probe (Address 0x5D/0x14)...");
-    uint8_t tp_addr = 0x5D;
-    bool found = false;
-
-    auto_probe_gt911:
-    for (int retry = 0; retry < 10; retry++) {
-        if (i2c_master_probe(i2c_bus, 0x5D, 200) == ESP_OK) {
-            tp_addr = 0x5D; found = true;
-            ESP_LOGI(TAG, "GT911 discovered at 0x5D (attempt %d)", retry + 1); break;
-        }
-        if (i2c_master_probe(i2c_bus, 0x14, 200) == ESP_OK) {
-            tp_addr = 0x14; found = true;
-            ESP_LOGI(TAG, "GT911 discovered at 0x14 (attempt %d)", retry + 1); break;
-        }
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
-
-    if (!found && tp_addr == 0x5D) {
-        ESP_LOGW(TAG, "[STEP 10] GT911 not found! Trying Address 0x14 selection sequence...");
-        irq_conf.mode = GPIO_MODE_OUTPUT;
-        ESP_ERROR_CHECK(gpio_config(&irq_conf));
-        ESP_ERROR_CHECK(gpio_set_level(TP_IRQ_PIN, 1)); // INT High for 0x14
-
-        ch422_exio_bits &= ~CH422G_PIN_TP_RST; // RST Low
-        ESP_ERROR_CHECK(ch422g_write_output(ch422_exio_bits));
-        vTaskDelay(pdMS_TO_TICKS(100));
-
-        ch422_exio_bits |= CH422G_PIN_TP_RST; // RST High
-        ESP_ERROR_CHECK(ch422g_write_output(ch422_exio_bits));
-        vTaskDelay(pdMS_TO_TICKS(50));
-
-        irq_conf.mode = GPIO_MODE_INPUT;
-        ESP_ERROR_CHECK(gpio_config(&irq_conf));
-        vTaskDelay(pdMS_TO_TICKS(200));
-
-        tp_addr = 0x14; // Mark that we tried 0x14 sequence
-        goto auto_probe_gt911;
-    }
-
-    if (!found) {
-        ESP_LOGW(TAG, "GT911 still not found! Performing full bus discovery...");
-        for (int i = 0; i < 128; i++) {
-            if (i2c_master_probe(i2c_bus, i, 100) == ESP_OK) {
-                ESP_LOGI(TAG, "Active device detected at 0x%02X", i);
-                if (i == 0x5D || i == 0x14) { tp_addr = i; found = true; }
-            }
-        }
-    }
+    vTaskDelay(pdMS_TO_TICKS(100));
 
     // RGB LCD Init
     esp_lcd_rgb_panel_config_t panel_conf = {
@@ -213,29 +137,6 @@ void hardware_init(void) {
     ESP_ERROR_CHECK(esp_lcd_panel_reset(lcd_panel));
     ESP_ERROR_CHECK(esp_lcd_panel_init(lcd_panel));
 
-    // Touch Init (GT911)
-    esp_lcd_touch_config_t tp_conf = {
-        .x_max = LCD_H_RES,
-        .y_max = LCD_V_RES,
-        .rst_gpio_num = -1, // Controlled by CH422G
-        .int_gpio_num = TP_IRQ_PIN,
-        .levels = {
-            .reset = 0,
-            .interrupt = 0,
-        },
-        .flags = {
-            .swap_xy = 0,
-            .mirror_x = 0,
-            .mirror_y = 0,
-        },
-    };
-    esp_lcd_panel_io_i2c_config_t tp_io_conf = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
-    tp_io_conf.dev_addr = tp_addr;
-    tp_io_conf.scl_speed_hz = 100000; // Use 100kHz for initial setup
-    esp_lcd_panel_io_handle_t tp_io_handle = NULL;
-    ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_bus, &tp_io_conf, &tp_io_handle));
-
-    ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_gt911(tp_io_handle, &tp_conf, &tp_handle));
 }
 
 void sd_card_test(void) {
@@ -286,24 +187,6 @@ void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
     lv_display_flush_ready(disp);
 }
 
-void lvgl_touch_cb(lv_indev_t *indev, lv_indev_data_t *data) {
-    esp_lcd_touch_point_data_t touch_point;
-    uint8_t touch_cnt = 0;
-
-    esp_err_t ret = esp_lcd_touch_read_data(tp_handle);
-    if (ret == ESP_OK) {
-        ret = esp_lcd_touch_get_data(tp_handle, &touch_point, &touch_cnt, 1);
-        if (ret == ESP_OK && touch_cnt > 0) {
-            data->point.x = touch_point.x;
-            data->point.y = touch_point.y;
-            data->state = LV_INDEV_STATE_PRESSED;
-        } else {
-            data->state = LV_INDEV_STATE_RELEASED;
-        }
-    } else {
-        data->state = LV_INDEV_STATE_RELEASED;
-    }
-}
 
 static uint32_t lvgl_tick_cb(void) {
     return esp_timer_get_time() / 1000;
@@ -320,10 +203,6 @@ void lvgl_init_task(void *arg) {
     lv_display_t *disp = lv_display_create(LCD_H_RES, LCD_V_RES);
     lv_display_set_buffers(disp, buf1, buf2, buffer_size * sizeof(lv_color_t), LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(disp, lvgl_flush_cb);
-
-    lv_indev_t *indev = lv_indev_create();
-    lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
-    lv_indev_set_read_cb(indev, lvgl_touch_cb);
 
     lv_obj_t *label = lv_label_create(lv_screen_active());
     lv_label_set_text(label, "Hello World from ESP32-S3!");
