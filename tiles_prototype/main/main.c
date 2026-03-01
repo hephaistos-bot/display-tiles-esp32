@@ -21,7 +21,7 @@ static const char *TAG = "TILES_PROTOTYPE";
 #define LCD_V_RES            480
 #define LCD_PIXEL_CLOCK_HZ   (12 * 1000 * 1000)
 
-// LCD RGB Pinout (Confirmed original)
+// LCD RGB Pinout
 #define LCD_PIN_R3           1
 #define LCD_PIN_R4           2
 #define LCD_PIN_R5           42
@@ -47,17 +47,8 @@ static const char *TAG = "TILES_PROTOTYPE";
 i2c_master_bus_handle_t i2c_bus = NULL;
 esp_lcd_panel_handle_t lcd_panel = NULL;
 
-void ch422_keep_alive_task(void *arg) {
-    while (1) {
-        // Keep everything HIGH to ensure backlight is ON
-        ch422g_write_output(0xFF);
-        ch422g_write_od(0xFF);
-        vTaskDelay(pdMS_TO_TICKS(500));
-    }
-}
-
 void app_main(void) {
-    ESP_LOGI(TAG, "Starting Minimal Screen Test...");
+    ESP_LOGI(TAG, "Starting Minimal Screen Test (V7 - Backlight ON)...");
     vTaskDelay(pdMS_TO_TICKS(1500));
 
     // I2C Init
@@ -76,8 +67,10 @@ void app_main(void) {
     ESP_ERROR_CHECK(ch422g_init(i2c_bus));
     ESP_ERROR_CHECK(ch422g_set_config(0x05)); // Enable both EXIO and OC
 
-    // Start keep-alive for backlight
-    xTaskCreate(ch422_keep_alive_task, "CH422", 2048, NULL, 5, NULL);
+    // BACKLIGHT ON (0xFF = HIGH, enabling DISP and taking LCD/TP out of Reset)
+    ESP_LOGI(TAG, "Enabling backlight and taking LCD out of reset (EXIO 0xFF)...");
+    ch422g_write_output(0xFF);
+    ch422g_write_od(0x00); // Keep OC low for now
     vTaskDelay(pdMS_TO_TICKS(500));
 
     // RGB LCD Init
