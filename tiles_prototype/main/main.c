@@ -74,14 +74,15 @@ void app_main(void) {
     sd_card_test();
 
     lvgl_mux = xSemaphoreCreateRecursiveMutex();
-    xTaskCreate(lvgl_init_task, "LVGL", 1024 * 8, NULL, 5, NULL);
+    xTaskCreate(lvgl_init_task, "LVGL", 1024 * 16, NULL, 5, NULL);
 }
 
 void hardware_init(void) {
-    ESP_LOGI(TAG, "Hardware stabilization...");
-    vTaskDelay(pdMS_TO_TICKS(500));
+    ESP_LOGI(TAG, "Hardware stabilization (1.5s)...");
+    vTaskDelay(pdMS_TO_TICKS(1500));
 
     // I2C Init (for CH422G)
+    ESP_LOGI(TAG, "Initializing I2C Master Bus...");
     i2c_master_bus_config_t i2c_bus_conf = {
         .clk_source = I2C_CLK_SRC_DEFAULT,
         .i2c_port = -1,
@@ -93,19 +94,24 @@ void hardware_init(void) {
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_conf, &i2c_bus));
 
     // CH422G Init
+    ESP_LOGI(TAG, "Initializing CH422G IO Expander...");
     ESP_ERROR_CHECK(ch422g_init(i2c_bus));
     ESP_ERROR_CHECK(ch422g_set_config(0x05)); // Enable IO/OC
 
     // LCD Reset via CH422G
-    ch422_exio_bits = CH422G_PIN_SD_CS; // All reset low, keep SD_CS high
+    ESP_LOGI(TAG, "Resetting LCD and enabling backlight...");
+    // Start with everything LOW except SD_CS
+    ch422_exio_bits = CH422G_PIN_SD_CS;
     ESP_ERROR_CHECK(ch422g_write_output(ch422_exio_bits));
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(200));
 
-    ch422_exio_bits |= CH422G_PIN_LCD_RST | CH422G_PIN_DISP | CH422G_PIN_TP_RST;
+    // Pull LCD_RST, TP_RST, and DISP HIGH. Also pull EXIO3 high as it might be used on some board revisions.
+    ch422_exio_bits |= CH422G_PIN_LCD_RST | CH422G_PIN_DISP | CH422G_PIN_TP_RST | (1 << 3);
     ESP_ERROR_CHECK(ch422g_write_output(ch422_exio_bits));
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(500)); // Longer delay for stabilization
 
     // RGB LCD Init
+    ESP_LOGI(TAG, "Initializing RGB LCD Panel...");
     esp_lcd_rgb_panel_config_t panel_conf = {
         .data_width = 16,
         .clk_src = LCD_CLK_SRC_DEFAULT,
@@ -134,9 +140,26 @@ void hardware_init(void) {
         .flags.fb_in_psram = 1,
     };
     ESP_ERROR_CHECK(esp_lcd_new_rgb_panel(&panel_conf, &lcd_panel));
+    ESP_LOGI(TAG, "LCD RGB panel created. Resetting and initializing...");
     ESP_ERROR_CHECK(esp_lcd_panel_reset(lcd_panel));
     ESP_ERROR_CHECK(esp_lcd_panel_init(lcd_panel));
+    ESP_LOGI(TAG, "LCD RGB panel initialized.");
 
+    // Simple Green Screen Fill Test
+    ESP_LOGI(TAG, "Performing hardware color fill test (Green)...");
+    uint16_t *test_buf = (uint16_t *)heap_caps_malloc(LCD_H_RES * 40 * sizeof(uint16_t), MALLOC_CAP_SPIRAM);
+    if (test_buf) {
+        for (int i = 0; i < LCD_H_RES * 40; i++) {
+            test_buf[i] = 0x07E0; // Green in RGB565
+        }
+        for (int y = 0; y < LCD_V_RES; y += 40) {
+            esp_lcd_panel_draw_bitmap(lcd_panel, 0, y, LCD_H_RES, y + 40, test_buf);
+        }
+        heap_caps_free(test_buf);
+        ESP_LOGI(TAG, "Hardware color fill test complete.");
+    } else {
+        ESP_LOGE(TAG, "Failed to allocate memory for color fill test.");
+    }
 }
 
 void sd_card_test(void) {
@@ -198,6 +221,7 @@ static uint32_t lvgl_tick_cb(void) {
 }
 
 void lvgl_init_task(void *arg) {
+    ESP_LOGI(TAG, "Starting LVGL task...");
     lv_init();
     lv_tick_set_cb(lvgl_tick_cb);
 
@@ -218,10 +242,16 @@ void lvgl_init_task(void *arg) {
     lv_label_set_text(sd_label, sd_status_msg);
     lv_obj_align(sd_label, LV_ALIGN_CENTER, 0, 20);
 
+    ESP_LOGI(TAG, "LVGL initialization complete. Entering main loop...");
+
     while (1) {
         xSemaphoreTakeRecursive(lvgl_mux, portMAX_DELAY);
         uint32_t time_till_next = lv_timer_handler();
         xSemaphoreGiveRecursive(lvgl_mux);
+
+        if (time_till_next < 1) {
+            time_till_next = 1;
+        }
         vTaskDelay(pdMS_TO_TICKS(time_till_next));
     }
 }
