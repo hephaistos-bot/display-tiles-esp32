@@ -17,7 +17,7 @@
  * Hardware Specifications: Waveshare ESP32-S3-Touch-LCD-5
  * - MCU: ESP32-S3 (16MB Flash, 8MB Octal PSRAM)
  * - Display: 5-inch 800x480 RGB LCD (ST7262)
- * - Touch Controller: GT911 (I2C address 0x5D/0x14)
+ * - Touch Controller: GT911 (I2C address 0x5D or 0x14)
  * - IO Expander: CH422G (Controls resets, backlight, and SD CS)
  */
 
@@ -26,7 +26,7 @@ static const char *TAG = "TILES_PROTOTYPE";
 // --- Hardware Pins ---
 #define I2C_SDA_PIN          8
 #define I2C_SCL_PIN          9
-#define TP_INT_PIN           4  // Touch Interrupt (Active LOW/High based on config)
+#define TP_INT_PIN           4  // Touch Interrupt
 
 // --- CH422G EXIO Bit Mapping ---
 #define CH422G_EXIO_LCD_RST  (1 << 0) // Bit 0: LCD Reset (Active LOW)
@@ -37,7 +37,7 @@ static const char *TAG = "TILES_PROTOTYPE";
 // --- RGB LCD Settings (800x480) ---
 #define LCD_H_RES            800
 #define LCD_V_RES            480
-#define LCD_PIXEL_CLOCK_HZ   (12 * 1000 * 1000) // 12MHz for stability
+#define LCD_PIXEL_CLOCK_HZ   (12 * 1000 * 1000)
 
 // --- LCD RGB Pinout ---
 #define LCD_PIN_R3           1
@@ -70,17 +70,23 @@ SemaphoreHandle_t lvgl_mux = NULL;
 void hardware_init(void);
 void lvgl_init_task(void *arg);
 
-void app_main(void) {
-    // 1. Initialize core hardware (I2C, CH422G, LCD, Touch)
-    hardware_init();
+void i2c_scan(void) {
+    ESP_LOGI(TAG, "Scanning I2C bus...");
+    for (uint8_t i = 1; i < 127; i++) {
+        esp_err_t ret = i2c_master_probe(i2c_bus, i, 200);
+        if (ret == ESP_OK) {
+            ESP_LOGI(TAG, "Found device at address 0x%02X", i);
+        }
+    }
+}
 
-    // 2. Setup LVGL Synchronization and Task
+void app_main(void) {
+    hardware_init();
     lvgl_mux = xSemaphoreCreateRecursiveMutex();
     xTaskCreate(lvgl_init_task, "LVGL", 1024 * 16, NULL, 5, NULL);
 }
 
 void hardware_init(void) {
-    // Hardware needs time to settle after power-up
     ESP_LOGI(TAG, "Hardware stabilization (1.5s)...");
     vTaskDelay(pdMS_TO_TICKS(1500));
 
@@ -98,10 +104,9 @@ void hardware_init(void) {
     // CH422G IO Expander Initialization
     ESP_LOGI(TAG, "Initializing CH422G...");
     ESP_ERROR_CHECK(ch422g_init(i2c_bus));
-    ESP_ERROR_CHECK(ch422g_set_config(0x05)); // Enable both EXIO and OC outputs
+    ESP_ERROR_CHECK(ch422g_set_config(0x05));
 
-    // --- GT911 Reset Sequence ---
-    // Address selection: TP_INT high during reset -> 0x14, low -> 0x5D
+    // --- GT911 Reset Sequence for Address 0x5D ---
     ESP_LOGI(TAG, "Resetting GT911 (Address 0x5D)...");
     gpio_config_t tp_int_conf = {
         .pin_bit_mask = (1ULL << TP_INT_PIN),
@@ -110,24 +115,26 @@ void hardware_init(void) {
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
     };
     gpio_config(&tp_int_conf);
-    gpio_set_level(TP_INT_PIN, 0); // Pull INT low for address 0x5D
+    gpio_set_level(TP_INT_PIN, 0); // INT low for 0x5D
 
-    // Reset via CH422G EXIO
-    // Bit 0: LCD_RST, Bit 1: TP_RST, Bit 2: DISP (Active Low for ON)
-    ch422g_write_output(CH422G_EXIO_LCD_RST | CH422G_EXIO_DISP); // LCD_RST high, TP_RST low, DISP high (OFF)
+    // Reset via CH422G
+    ch422g_write_output(CH422G_EXIO_LCD_RST | CH422G_EXIO_DISP); // TP_RST low
     vTaskDelay(pdMS_TO_TICKS(100));
     ch422g_write_output(CH422G_EXIO_LCD_RST | CH422G_EXIO_TP_RST | CH422G_EXIO_DISP); // TP_RST high
     vTaskDelay(pdMS_TO_TICKS(10));
 
-    // Switch TP_INT back to input
+    // Switch INT back to input
     tp_int_conf.mode = GPIO_MODE_INPUT;
     tp_int_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     gpio_config(&tp_int_conf);
     vTaskDelay(pdMS_TO_TICKS(200));
 
+    // Scan bus to verify address
+    i2c_scan();
+
     // Turn ON Backlight and release resets
     ESP_LOGI(TAG, "Enabling Backlight and LCD...");
-    ch422g_write_output(CH422G_EXIO_LCD_RST | CH422G_EXIO_TP_RST); // Backlight bit is 0 (ON)
+    ch422g_write_output(CH422G_EXIO_LCD_RST | CH422G_EXIO_TP_RST);
     ch422g_write_od(0x00);
     vTaskDelay(pdMS_TO_TICKS(500));
 
@@ -165,9 +172,23 @@ void hardware_init(void) {
     ESP_ERROR_CHECK(esp_lcd_panel_init(lcd_panel));
 
     // Touch Controller Initialization
-    ESP_LOGI(TAG, "Initializing GT911 Touch Controller...");
+    // Probe for the address first
+    uint16_t tp_addr = 0x5D;
+    if (i2c_master_probe(i2c_bus, 0x5D, 200) != ESP_OK) {
+        ESP_LOGW(TAG, "GT911 not found at 0x5D, probing 0x14...");
+        if (i2c_master_probe(i2c_bus, 0x14, 200) == ESP_OK) {
+            tp_addr = 0x14;
+            ESP_LOGI(TAG, "GT911 found at 0x14");
+        } else {
+            ESP_LOGE(TAG, "GT911 not found on I2C bus!");
+        }
+    } else {
+        ESP_LOGI(TAG, "GT911 found at 0x5D");
+    }
+
+    ESP_LOGI(TAG, "Initializing GT911 Touch Controller at 0x%02X...", tp_addr);
     esp_lcd_panel_io_i2c_config_t tp_io_conf = {
-        .dev_addr = 0x5D,
+        .dev_addr = tp_addr,
         .on_color_trans_done = NULL,
         .user_ctx = NULL,
         .control_phase_bytes = 1,
@@ -177,7 +198,7 @@ void hardware_init(void) {
         .flags = {
             .disable_control_phase = 1,
         },
-        .scl_speed_hz = 400000,
+        .scl_speed_hz = 100000, // Use 100kHz for better reliability
     };
     esp_lcd_panel_io_handle_t tp_io_handle = NULL;
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_bus, &tp_io_conf, &tp_io_handle));
@@ -185,7 +206,7 @@ void hardware_init(void) {
     esp_lcd_touch_config_t tp_conf = {
         .x_max = LCD_H_RES,
         .y_max = LCD_V_RES,
-        .rst_gpio_num = -1, // Handled via CH422G
+        .rst_gpio_num = -1,
         .int_gpio_num = TP_INT_PIN,
         .levels = {
             .reset = 0,
@@ -206,22 +227,28 @@ void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
     lv_display_flush_ready(disp);
 }
 
-// LVGL Input Callback: Reads touch data from the GT911 controller
+// LVGL Input Callback
 void lvgl_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
+    if (!touch_handle) {
+        data->state = LV_INDEV_STATE_RELEASED;
+        return;
+    }
+
     esp_lcd_touch_point_data_t point;
     uint8_t tp_num = 0;
 
-    // Read data from the touch controller
-    esp_lcd_touch_read_data(touch_handle);
+    esp_err_t err = esp_lcd_touch_read_data(touch_handle);
+    if (err != ESP_OK) {
+        data->state = LV_INDEV_STATE_RELEASED;
+        return;
+    }
 
-    // Fetch the coordinates
-    esp_err_t err = esp_lcd_touch_get_data(touch_handle, &point, &tp_num, 1);
+    err = esp_lcd_touch_get_data(touch_handle, &point, &tp_num, 1);
 
     if (err == ESP_OK && tp_num > 0) {
         data->point.x = point.x;
         data->point.y = point.y;
         data->state = LV_INDEV_STATE_PRESSED;
-        // Periodic logging of touch coordinates
         ESP_LOGI(TAG, "Touch detected at: x=%d, y=%d", point.x, point.y);
     } else {
         data->state = LV_INDEV_STATE_RELEASED;
@@ -246,7 +273,7 @@ void lvgl_init_task(void *arg) {
     lv_display_set_buffers(disp, buf1, buf2, buffer_size * sizeof(lv_color_t), LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(disp, lvgl_flush_cb);
 
-    // Register Input Device (Touch)
+    // Register Input Device
     lv_indev_t *indev = lv_indev_create();
     lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(indev, lvgl_touch_read_cb);
