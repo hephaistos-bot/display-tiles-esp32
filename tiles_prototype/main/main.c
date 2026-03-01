@@ -19,9 +19,9 @@ static const char *TAG = "TILES_PROTOTYPE";
 // RGB LCD Settings (800x480)
 #define LCD_H_RES            800
 #define LCD_V_RES            480
-#define LCD_PIXEL_CLOCK_HZ   (10 * 1000 * 1000) // Conservative 10MHz
+#define LCD_PIXEL_CLOCK_HZ   (18 * 1000 * 1000)
 
-// LCD RGB Pinout (Waveshare ESP32-S3-Touch-LCD-5 Official)
+// LCD RGB Pinout
 #define LCD_PIN_R3           1
 #define LCD_PIN_R4           2
 #define LCD_PIN_R5           42
@@ -47,16 +47,8 @@ static const char *TAG = "TILES_PROTOTYPE";
 i2c_master_bus_handle_t i2c_bus = NULL;
 esp_lcd_panel_handle_t lcd_panel = NULL;
 
-void ch422_keep_alive_task(void *arg) {
-    while (1) {
-        // Repeatedly send "ON" state to CH422G to ensure it stays active
-        ch422g_write_output(0xFF);
-        vTaskDelay(pdMS_TO_TICKS(200));
-    }
-}
-
 void app_main(void) {
-    ESP_LOGI(TAG, "Starting Time-Sequenced Hardware Test...");
+    ESP_LOGI(TAG, "Starting Display Test (Backlight Active LOW)...");
     vTaskDelay(pdMS_TO_TICKS(1500));
 
     // 1. I2C Init
@@ -76,19 +68,23 @@ void app_main(void) {
     // 2. CH422G Init
     ESP_LOGI(TAG, "Initializing CH422G...");
     ch422g_init(i2c_bus);
+    ch422g_set_config(0x05); // Enable EXIO and OC
 
-    // Diagnostic Polarity Test
-    ESP_LOGI(TAG, "Diagnostic: Setting EXIO to 0x00 (Low) for 3 seconds...");
+    // BACKLIGHT ON (Confirmed 0x00 turns it ON)
+    ESP_LOGI(TAG, "Enabling backlight (EXIO=0x00, OC=0x00)...");
+    ch422g_write_od(0x00);
+
+    // RESET LCD: Bit 0 is LCD_RST (Active LOW). We need a transition LOW->HIGH
+    // Start LOW (Reset active)
     ch422g_write_output(0x00);
-    vTaskDelay(pdMS_TO_TICKS(3000));
+    vTaskDelay(pdMS_TO_TICKS(200));
 
-    ESP_LOGI(TAG, "Diagnostic: Setting EXIO to 0xFF (High) for 3 seconds...");
-    ch422g_write_output(0xFF);
-    vTaskDelay(pdMS_TO_TICKS(3000));
-
-    ESP_LOGI(TAG, "Finalizing Backlight: Enabling Keep-Alive (EXIO=0xFF)...");
-    xTaskCreate(ch422_keep_alive_task, "CH422_KA", 2048, NULL, 5, NULL);
-    vTaskDelay(pdMS_TO_TICKS(2000)); // Wait for backlight to stabilize
+    // Finish Reset: Take LCD_RST (Bit 0) and TP_RST (Bit 1) HIGH. Also SD_CS (Bit 4) HIGH.
+    // Bits: 0001 0011 -> 0x13
+    // DISP (Bit 2) remains LOW (ON)
+    ESP_LOGI(TAG, "Taking LCD out of reset (EXIO=0x13)...");
+    ch422g_write_output(0x13);
+    vTaskDelay(pdMS_TO_TICKS(500));
 
     // 3. RGB LCD Init
     ESP_LOGI(TAG, "Initializing RGB LCD Panel...");
@@ -128,19 +124,19 @@ void app_main(void) {
         ESP_LOGE(TAG, "LCD Panel Creation Failed!");
     }
 
-    // 4. Constant RED Fill
+    // 4. Fill screen with RED
     uint16_t *line_buf = heap_caps_malloc(LCD_H_RES * 40 * sizeof(uint16_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (line_buf) {
         for (int i = 0; i < LCD_H_RES * 40; i++) line_buf[i] = 0xF800; // Red
     }
 
-    ESP_LOGI(TAG, "Entering RED Fill Loop...");
+    ESP_LOGI(TAG, "Entering Main Loop...");
     while (1) {
         if (line_buf && lcd_panel) {
             for (int y = 0; y < LCD_V_RES; y += 40) {
                 esp_lcd_panel_draw_bitmap(lcd_panel, 0, y, LCD_H_RES, y + 40, line_buf);
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(500));
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
