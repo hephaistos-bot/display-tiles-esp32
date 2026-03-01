@@ -9,14 +9,14 @@ extern "C" {
 #endif
 
 // I2C Addresses for CH422G (7-bit)
-#define CH422G_I2C_ADDR_IO     0x20  // EXIO
-#define CH422G_I2C_ADDR_OC     0x38  // Open-Drain
-#define CH422G_I2C_ADDR_SET    0x24  // Config/Setting register
+#define CH422G_I2C_ADDR_IO     0x27  // EXIO (Byte-wide write: 4EH)
+#define CH422G_I2C_ADDR_OC     0x38  // Open-Drain (Byte-wide write: 70H)
+#define CH422G_I2C_ADDR_SET    0x24  // Config/Setting register (48H)
 
 // Specific pins for Waveshare board (EXIO range)
+#define CH422G_PIN_LCD_RST     (1 << 0)
 #define CH422G_PIN_TP_RST      (1 << 1)
 #define CH422G_PIN_DISP        (1 << 2)
-#define CH422G_PIN_LCD_RST     (1 << 3)
 #define CH422G_PIN_SD_CS       (1 << 4)
 
 // Specific pins for Open-Drain (OD range)
