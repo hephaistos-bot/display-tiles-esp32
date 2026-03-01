@@ -19,7 +19,7 @@ static const char *TAG = "TILES_PROTOTYPE";
 // RGB LCD Settings (800x480)
 #define LCD_H_RES            800
 #define LCD_V_RES            480
-#define LCD_PIXEL_CLOCK_HZ   (18 * 1000 * 1000)
+#define LCD_PIXEL_CLOCK_HZ   (12 * 1000 * 1000)
 
 // LCD RGB Pinout
 #define LCD_PIN_R3           1
@@ -95,12 +95,12 @@ void app_main(void) {
             .pclk_hz = LCD_PIXEL_CLOCK_HZ,
             .h_res = LCD_H_RES,
             .v_res = LCD_V_RES,
-            .hsync_back_porch = 40,
-            .hsync_front_porch = 48,
-            .hsync_pulse_width = 40,
-            .vsync_back_porch = 32,
-            .vsync_front_porch = 13,
-            .vsync_pulse_width = 23,
+            .hsync_back_porch = 8,
+            .hsync_front_porch = 8,
+            .hsync_pulse_width = 4,
+            .vsync_back_porch = 8,
+            .vsync_front_porch = 8,
+            .vsync_pulse_width = 4,
             .flags.pclk_active_neg = 1,
         },
         .flags.fb_in_psram = 1,
