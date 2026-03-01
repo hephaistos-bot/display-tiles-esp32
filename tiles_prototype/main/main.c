@@ -2,12 +2,14 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "esp_timer.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_rgb.h"
 #include "driver/i2c_master.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "lvgl.h"
 #include "ch422g.h"
 
 static const char *TAG = "TILES_PROTOTYPE";
@@ -46,12 +48,23 @@ static const char *TAG = "TILES_PROTOTYPE";
 // Global Handles
 i2c_master_bus_handle_t i2c_bus = NULL;
 esp_lcd_panel_handle_t lcd_panel = NULL;
+SemaphoreHandle_t lvgl_mux = NULL;
+
+void hardware_init(void);
+void lvgl_init_task(void *arg);
 
 void app_main(void) {
-    ESP_LOGI(TAG, "Starting Minimal Screen Test (Working Backlight)...");
+    hardware_init();
+
+    lvgl_mux = xSemaphoreCreateRecursiveMutex();
+    xTaskCreate(lvgl_init_task, "LVGL", 1024 * 16, NULL, 5, NULL);
+}
+
+void hardware_init(void) {
+    ESP_LOGI(TAG, "Hardware stabilization (1.5s)...");
     vTaskDelay(pdMS_TO_TICKS(1500));
 
-    // 1. I2C Init
+    // I2C Init
     i2c_master_bus_config_t i2c_bus_conf = {
         .clk_source = I2C_CLK_SRC_DEFAULT,
         .i2c_port = -1,
@@ -60,23 +73,17 @@ void app_main(void) {
         .glitch_ignore_cnt = 7,
         .flags.enable_internal_pullup = true,
     };
-    if (i2c_new_master_bus(&i2c_bus_conf, &i2c_bus) != ESP_OK) {
-        ESP_LOGE(TAG, "I2C Bus Init Failed!");
-        return;
-    }
+    ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_conf, &i2c_bus));
 
-    // 2. CH422G Init
-    ESP_LOGI(TAG, "Initializing CH422G...");
-    ch422g_init(i2c_bus);
-    ch422g_set_config(0x05); // Enable EXIO and OC
-
-    // BACKLIGHT ON (0x00 turns it ON and keeps LCD out of Reset on some boards)
-    ESP_LOGI(TAG, "Enabling backlight and taking LCD out of reset (EXIO=0x00)...");
+    // CH422G Init (Backlight Active LOW as confirmed)
+    ESP_LOGI(TAG, "Enabling CH422G Backlight (EXIO=0x00, OC=0x00)...");
+    ESP_ERROR_CHECK(ch422g_init(i2c_bus));
+    ESP_ERROR_CHECK(ch422g_set_config(0x05));
     ch422g_write_output(0x00);
     ch422g_write_od(0x00);
     vTaskDelay(pdMS_TO_TICKS(500));
 
-    // 3. RGB LCD Init
+    // RGB LCD Init
     ESP_LOGI(TAG, "Initializing RGB LCD Panel...");
     esp_lcd_rgb_panel_config_t panel_conf = {
         .data_width = 16,
@@ -105,28 +112,50 @@ void app_main(void) {
         },
         .flags.fb_in_psram = 1,
     };
+    ESP_ERROR_CHECK(esp_lcd_new_rgb_panel(&panel_conf, &lcd_panel));
+    ESP_ERROR_CHECK(esp_lcd_panel_reset(lcd_panel));
+    ESP_ERROR_CHECK(esp_lcd_panel_init(lcd_panel));
+    ESP_LOGI(TAG, "LCD RGB panel initialized.");
+}
 
-    if (esp_lcd_new_rgb_panel(&panel_conf, &lcd_panel) == ESP_OK) {
-        esp_lcd_panel_reset(lcd_panel);
-        esp_lcd_panel_init(lcd_panel);
-        ESP_LOGI(TAG, "LCD initialized successfully.");
-    } else {
-        ESP_LOGE(TAG, "LCD Panel Creation Failed!");
-    }
+void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
+    esp_lcd_panel_draw_bitmap(lcd_panel, area->x1, area->y1, area->x2 + 1, area->y2 + 1, px_map);
+    lv_display_flush_ready(disp);
+}
 
-    // 4. Fill screen with RED
-    uint16_t *line_buf = heap_caps_malloc(LCD_H_RES * 40 * sizeof(uint16_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    if (line_buf) {
-        for (int i = 0; i < LCD_H_RES * 40; i++) line_buf[i] = 0xF800; // Red
-    }
+static uint32_t lvgl_tick_cb(void) {
+    return esp_timer_get_time() / 1000;
+}
 
-    ESP_LOGI(TAG, "Entering Main Loop...");
+void lvgl_init_task(void *arg) {
+    ESP_LOGI(TAG, "Starting LVGL task...");
+    lv_init();
+    lv_tick_set_cb(lvgl_tick_cb);
+
+    uint32_t buffer_size = LCD_H_RES * 40;
+    lv_color_t *buf1 = heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_SPIRAM);
+    lv_color_t *buf2 = heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_SPIRAM);
+
+    lv_display_t *disp = lv_display_create(LCD_H_RES, LCD_V_RES);
+    lv_display_set_buffers(disp, buf1, buf2, buffer_size * sizeof(lv_color_t), LV_DISPLAY_RENDER_MODE_PARTIAL);
+    lv_display_set_flush_cb(disp, lvgl_flush_cb);
+
+    lv_obj_t *label = lv_label_create(lv_screen_active());
+    lv_label_set_text(label, "Hello World from ESP32-S3!");
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_20, 0);
+    lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_text_color(label, lv_palette_main(LV_PALETTE_BLUE), 0);
+
+    ESP_LOGI(TAG, "LVGL initialization complete. Entering main loop...");
+
     while (1) {
-        if (line_buf && lcd_panel) {
-            for (int y = 0; y < LCD_V_RES; y += 40) {
-                esp_lcd_panel_draw_bitmap(lcd_panel, 0, y, LCD_H_RES, y + 40, line_buf);
-            }
+        xSemaphoreTakeRecursive(lvgl_mux, portMAX_DELAY);
+        uint32_t time_till_next = lv_timer_handler();
+        xSemaphoreGiveRecursive(lvgl_mux);
+
+        if (time_till_next < 1) {
+            time_till_next = 1;
         }
-        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(time_till_next));
     }
 }
