@@ -12,6 +12,10 @@
 #include "esp_log.h"
 #include "lvgl.h"
 #include "ch422g.h"
+#include "esp_vfs_fat.h"
+#include "sdmmc_cmd.h"
+#include "driver/sdspi_host.h"
+#include "TileEngine.hpp"
 
 static const char *TAG = "TILES_PROTOTYPE";
 
@@ -19,6 +23,10 @@ static const char *TAG = "TILES_PROTOTYPE";
 #define I2C_SDA_PIN          8
 #define I2C_SCL_PIN          9
 #define TP_INT_PIN           4
+
+#define SD_MOSI_PIN          11
+#define SD_SCK_PIN           12
+#define SD_MISO_PIN          13
 
 // --- CH422G EXIO Bit Mapping (Waveshare 5-inch Board) ---
 #define CH422G_EXIO_LCD_RST  (1 << 0) // Bit 0: LCD Reset (Active LOW)
@@ -63,8 +71,10 @@ i2c_master_bus_handle_t i2c_bus = NULL;
 esp_lcd_panel_handle_t lcd_panel = NULL;
 esp_lcd_touch_handle_t tp_handle = NULL;
 SemaphoreHandle_t lvgl_mux = NULL;
+sdmmc_card_t *card = NULL;
 
 void hardware_init(void);
+esp_err_t init_sd_card(void);
 void lvgl_init_task(void *arg);
 
 void app_main(void) {
@@ -187,6 +197,58 @@ void hardware_init(void) {
     };
     ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_gt911(tp_io_handle, &tp_cfg, &tp_handle));
     ESP_LOGI(TAG, "Touch controller initialized successfully.");
+
+    // SD Card Initialization
+    ESP_ERROR_CHECK(init_sd_card());
+}
+
+esp_err_t init_sd_card(void) {
+    ESP_LOGI(TAG, "Initializing SD card (SPI)");
+
+    esp_vfs_fat_sdmmc_mount_config_t mount_config = {
+        .format_if_mount_failed = false,
+        .max_files = 5,
+        .allocation_unit_size = 16 * 1024
+    };
+
+    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
+    // Use high speed SPI (20MHz+) as requested
+    host.max_freq_khz = 20000;
+
+    spi_bus_config_t bus_cfg = {
+        .mosi_io_num = SD_MOSI_PIN,
+        .miso_io_num = SD_MISO_PIN,
+        .sclk_io_num = SD_SCK_PIN,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .max_transfer_sz = 4000,
+    };
+    esp_err_t ret = spi_bus_initialize((spi_host_device_t)host.slot, &bus_cfg, SPI_DMA_CH_AUTO);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize SPI bus.");
+        return ret;
+    }
+
+    sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
+    slot_config.gpio_cs = (gpio_num_t)-1; // Managed via CH422G
+    slot_config.host_id = (spi_host_device_t)host.slot;
+
+    // Reliability: Toggling SD_CS (High -> Delay -> Low) prior to mounting
+    ESP_LOGI(TAG, "Toggling SD_CS via CH422G...");
+    ch422g_write_output(CH422G_EXIO_SD_CS | CH422G_EXIO_LCD_RST); // High (Inactive)
+    vTaskDelay(pdMS_TO_TICKS(50));
+    ch422g_write_output(CH422G_EXIO_LCD_RST); // Low (Active)
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    ret = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_config, &mount_config, &card);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to mount SD card VFS (%s)", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "SD card mounted at /sdcard");
+    sdmmc_card_print_info(stdout, card);
+    return ESP_OK;
 }
 
 // LVGL Flush Callback
@@ -240,10 +302,20 @@ void lvgl_init_task(void *arg) {
     lv_init();
     lv_tick_set_cb(lvgl_tick_cb);
 
-    // Allocate draw buffers in PSRAM
-    uint32_t buffer_size = LCD_H_RES * 40;
-    lv_color_t *buf1 = heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_SPIRAM);
-    lv_color_t *buf2 = heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_SPIRAM);
+    // Image Cache Configuration: Use PSRAM for decoded images
+    // In LVGL 9, we can set the image cache size.
+    // We also want to ensure decoded images end up in PSRAM.
+    lv_image_cache_set_size(4 * 1024 * 1024); // 4MB cache is plenty for this screen
+
+    // Allocate draw buffers in internal SRAM for performance
+    uint32_t buffer_size = LCD_H_RES * 60;
+    lv_color_t *buf1 = (lv_color_t *)heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    lv_color_t *buf2 = (lv_color_t *)heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+
+    if (!buf1 || !buf2) {
+        ESP_LOGE(TAG, "Failed to allocate LVGL draw buffers in internal SRAM");
+        abort();
+    }
 
     // Initialize LVGL Display
     lv_display_t *disp = lv_display_create(LCD_H_RES, LCD_V_RES);
@@ -258,19 +330,10 @@ void lvgl_init_task(void *arg) {
         lv_indev_set_read_cb(indev, lvgl_touch_read_cb);
     }
 
-    // Create a simple UI: "Hello World" with a button to test touch
-    lv_obj_t *label = lv_label_create(lv_screen_active());
-    lv_label_set_text(label, "Hello World from ESP32-S3!");
-    lv_obj_set_style_text_font(label, &lv_font_montserrat_20, 0);
-    lv_obj_align(label, LV_ALIGN_CENTER, 0, -40);
-    lv_obj_set_style_text_color(label, lv_palette_main(LV_PALETTE_BLUE), 0);
-
-    lv_obj_t * btn = lv_button_create(lv_screen_active());
-    lv_obj_align(btn, LV_ALIGN_CENTER, 0, 40);
-    lv_obj_add_event_cb(btn, btn_event_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t * btn_label = lv_label_create(btn);
-    lv_label_set_text(btn_label, "Touch Me");
-    lv_obj_center(btn_label);
+    // Initialize Tile Engine
+    static TileEngine engine;
+    engine.init();
+    engine.setMapCenter(0.0, 0.0, 5); // Test Case: Equator
 
     ESP_LOGI(TAG, "LVGL initialization complete. Entering main loop...");
 
