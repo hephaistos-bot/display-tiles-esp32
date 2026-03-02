@@ -93,7 +93,7 @@ extern "C" void app_main(void) {
 
     // 2. Setup LVGL Synchronization and Task
     lvgl_mux = xSemaphoreCreateRecursiveMutex();
-    xTaskCreate(lvgl_init_task, "LVGL", 1024 * 32, NULL, 5, NULL);
+    xTaskCreate(lvgl_init_task, "LVGL", 1024 * 64, NULL, 5, NULL);
 }
 
 void hardware_init(void) {
@@ -262,7 +262,7 @@ esp_err_t init_sd_card(void) {
 
     esp_vfs_fat_sdmmc_mount_config_t mount_config = {};
     mount_config.format_if_mount_failed = false;
-    mount_config.max_files = 5;
+    mount_config.max_files = 20;
     mount_config.allocation_unit_size = 16 * 1024;
 
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
