@@ -140,11 +140,11 @@ void hardware_init(void) {
     esp_lcd_rgb_panel_config_t panel_conf = {};
     panel_conf.data_width = 16;
     panel_conf.clk_src = LCD_CLK_SRC_DEFAULT;
-    panel_conf.disp_gpio_num = -1;
-    panel_conf.pclk_gpio_num = LCD_PIN_PCLK;
-    panel_conf.vsync_gpio_num = LCD_PIN_VSYNC;
-    panel_conf.hsync_gpio_num = LCD_PIN_HSYNC;
-    panel_conf.de_gpio_num = LCD_PIN_DE;
+    panel_conf.disp_gpio_num = (gpio_num_t)-1;
+    panel_conf.pclk_gpio_num = (gpio_num_t)LCD_PIN_PCLK;
+    panel_conf.vsync_gpio_num = (gpio_num_t)LCD_PIN_VSYNC;
+    panel_conf.hsync_gpio_num = (gpio_num_t)LCD_PIN_HSYNC;
+    panel_conf.de_gpio_num = (gpio_num_t)LCD_PIN_DE;
 
     int data_gpios[] = {
         LCD_PIN_B3, LCD_PIN_B4, LCD_PIN_B5, LCD_PIN_B6, LCD_PIN_B7,
@@ -152,7 +152,7 @@ void hardware_init(void) {
         LCD_PIN_R3, LCD_PIN_R4, LCD_PIN_R5, LCD_PIN_R6, LCD_PIN_R7,
     };
     for (int i = 0; i < 16; i++) {
-        panel_conf.data_gpio_nums[i] = data_gpios[i];
+        panel_conf.data_gpio_nums[i] = (gpio_num_t)data_gpios[i];
     }
 
     panel_conf.timings.pclk_hz = LCD_PIXEL_CLOCK_HZ;
@@ -298,11 +298,6 @@ void lvgl_init_task(void *arg) {
     ESP_LOGI(TAG, "Starting LVGL task...");
     lv_init();
     lv_tick_set_cb(lvgl_tick_cb);
-
-    // Image Cache Configuration: Use PSRAM for decoded images
-    // In LVGL 9, we can set the image cache size.
-    // We also want to ensure decoded images end up in PSRAM.
-    lv_image_cache_resize(4 * 1024 * 1024, false); // 4MB cache is plenty for this screen
 
     // Allocate draw buffers in internal SRAM for performance
     uint32_t buffer_size = LCD_H_RES * 60;
