@@ -92,14 +92,13 @@ void hardware_init(void) {
     vTaskDelay(pdMS_TO_TICKS(1500));
 
     // I2C Bus Initialization
-    i2c_master_bus_config_t i2c_bus_conf = {
-        .clk_source = I2C_CLK_SRC_DEFAULT,
-        .i2c_port = -1,
-        .sda_io_num = I2C_SDA_PIN,
-        .scl_io_num = I2C_SCL_PIN,
-        .glitch_ignore_cnt = 7,
-        .flags.enable_internal_pullup = true,
-    };
+    i2c_master_bus_config_t i2c_bus_conf = {};
+    i2c_bus_conf.clk_source = I2C_CLK_SRC_DEFAULT;
+    i2c_bus_conf.i2c_port = -1;
+    i2c_bus_conf.sda_io_num = (gpio_num_t)I2C_SDA_PIN;
+    i2c_bus_conf.scl_io_num = (gpio_num_t)I2C_SCL_PIN;
+    i2c_bus_conf.glitch_ignore_cnt = 7;
+    i2c_bus_conf.flags.enable_internal_pullup = true;
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_conf, &i2c_bus));
 
     // CH422G IO Expander Initialization
@@ -124,13 +123,12 @@ void hardware_init(void) {
 
     // 4. GT911 Reset Sequence for Address 0x5D
     ESP_LOGI(TAG, "GT911 Reset Sequence...");
-    gpio_config_t io_conf = {
-        .intr_type = GPIO_INTR_DISABLE,
-        .mode = GPIO_MODE_OUTPUT,
-        .pin_bit_mask = (1ULL << TP_INT_PIN),
-    };
+    gpio_config_t io_conf = {};
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    io_conf.pin_bit_mask = (1ULL << TP_INT_PIN);
     gpio_config(&io_conf);
-    gpio_set_level(TP_INT_PIN, 0);
+    gpio_set_level((gpio_num_t)TP_INT_PIN, 0);
     vTaskDelay(pdMS_TO_TICKS(100));
 
     // Release Touch Reset (OC Bit 1) -> 0x2E
@@ -139,33 +137,35 @@ void hardware_init(void) {
 
     // RGB LCD Initialization
     ESP_LOGI(TAG, "Initializing RGB LCD Panel...");
-    esp_lcd_rgb_panel_config_t panel_conf = {
-        .data_width = 16,
-        .clk_src = LCD_CLK_SRC_DEFAULT,
-        .disp_gpio_num = -1,
-        .pclk_gpio_num = LCD_PIN_PCLK,
-        .vsync_gpio_num = LCD_PIN_VSYNC,
-        .hsync_gpio_num = LCD_PIN_HSYNC,
-        .de_gpio_num = LCD_PIN_DE,
-        .data_gpio_nums = {
-            LCD_PIN_B3, LCD_PIN_B4, LCD_PIN_B5, LCD_PIN_B6, LCD_PIN_B7,
-            LCD_PIN_G2, LCD_PIN_G3, LCD_PIN_G4, LCD_PIN_G5, LCD_PIN_G6, LCD_PIN_G7,
-            LCD_PIN_R3, LCD_PIN_R4, LCD_PIN_R5, LCD_PIN_R6, LCD_PIN_R7,
-        },
-        .timings = {
-            .pclk_hz = LCD_PIXEL_CLOCK_HZ,
-            .h_res = LCD_H_RES,
-            .v_res = LCD_V_RES,
-            .hsync_back_porch = 8,
-            .hsync_front_porch = 8,
-            .hsync_pulse_width = 4,
-            .vsync_back_porch = 8,
-            .vsync_front_porch = 8,
-            .vsync_pulse_width = 4,
-            .flags.pclk_active_neg = 1,
-        },
-        .flags.fb_in_psram = 1,
+    esp_lcd_rgb_panel_config_t panel_conf = {};
+    panel_conf.data_width = 16;
+    panel_conf.clk_src = LCD_CLK_SRC_DEFAULT;
+    panel_conf.disp_gpio_num = (gpio_num_t)-1;
+    panel_conf.pclk_gpio_num = (gpio_num_t)LCD_PIN_PCLK;
+    panel_conf.vsync_gpio_num = (gpio_num_t)LCD_PIN_VSYNC;
+    panel_conf.hsync_gpio_num = (gpio_num_t)LCD_PIN_HSYNC;
+    panel_conf.de_gpio_num = (gpio_num_t)LCD_PIN_DE;
+
+    int data_gpios[] = {
+        LCD_PIN_B3, LCD_PIN_B4, LCD_PIN_B5, LCD_PIN_B6, LCD_PIN_B7,
+        LCD_PIN_G2, LCD_PIN_G3, LCD_PIN_G4, LCD_PIN_G5, LCD_PIN_G6, LCD_PIN_G7,
+        LCD_PIN_R3, LCD_PIN_R4, LCD_PIN_R5, LCD_PIN_R6, LCD_PIN_R7,
     };
+    for (int i = 0; i < 16; i++) {
+        panel_conf.data_gpio_nums[i] = (gpio_num_t)data_gpios[i];
+    }
+
+    panel_conf.timings.pclk_hz = LCD_PIXEL_CLOCK_HZ;
+    panel_conf.timings.h_res = LCD_H_RES;
+    panel_conf.timings.v_res = LCD_V_RES;
+    panel_conf.timings.hsync_back_porch = 8;
+    panel_conf.timings.hsync_front_porch = 8;
+    panel_conf.timings.hsync_pulse_width = 4;
+    panel_conf.timings.vsync_back_porch = 8;
+    panel_conf.timings.vsync_front_porch = 8;
+    panel_conf.timings.vsync_pulse_width = 4;
+    panel_conf.timings.flags.pclk_active_neg = 1;
+    panel_conf.flags.fb_in_psram = 1;
     ESP_ERROR_CHECK(esp_lcd_new_rgb_panel(&panel_conf, &lcd_panel));
     ESP_ERROR_CHECK(esp_lcd_panel_reset(lcd_panel));
     ESP_ERROR_CHECK(esp_lcd_panel_init(lcd_panel));
@@ -173,28 +173,27 @@ void hardware_init(void) {
 
     // GT911 Initialization
     ESP_LOGI(TAG, "Initializing GT911 Touch Controller...");
-    esp_lcd_panel_io_i2c_config_t tp_io_config = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
+    esp_lcd_panel_io_i2c_config_t tp_io_config = {};
     tp_io_config.dev_addr = 0x5D;
     tp_io_config.scl_speed_hz = 400000;
+    tp_io_config.control_phase_bytes = 1;
+    tp_io_config.dc_bit_offset = 0;
+    tp_io_config.lcd_param_bits = 0;
+    tp_io_config.flags.disable_control_phase = 1;
 
     esp_lcd_panel_io_handle_t tp_io_handle = NULL;
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_bus, &tp_io_config, &tp_io_handle));
 
-    const esp_lcd_touch_config_t tp_cfg = {
-        .x_max = LCD_H_RES,
-        .y_max = LCD_V_RES,
-        .rst_gpio_num = -1, // Managed via CH422G OC
-        .int_gpio_num = TP_INT_PIN,
-        .levels = {
-            .reset = 0,
-            .interrupt = 0,
-        },
-        .flags = {
-            .swap_xy = 0,
-            .mirror_x = 0,
-            .mirror_y = 0,
-        },
-    };
+    esp_lcd_touch_config_t tp_cfg = {};
+    tp_cfg.x_max = LCD_H_RES;
+    tp_cfg.y_max = LCD_V_RES;
+    tp_cfg.rst_gpio_num = (gpio_num_t)-1; // Managed via CH422G OC
+    tp_cfg.int_gpio_num = (gpio_num_t)TP_INT_PIN;
+    tp_cfg.levels.reset = 0;
+    tp_cfg.levels.interrupt = 0;
+    tp_cfg.flags.swap_xy = 0;
+    tp_cfg.flags.mirror_x = 0;
+    tp_cfg.flags.mirror_y = 0;
     ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_gt911(tp_io_handle, &tp_cfg, &tp_handle));
     ESP_LOGI(TAG, "Touch controller initialized successfully.");
 
@@ -205,24 +204,22 @@ void hardware_init(void) {
 esp_err_t init_sd_card(void) {
     ESP_LOGI(TAG, "Initializing SD card (SPI)");
 
-    esp_vfs_fat_sdmmc_mount_config_t mount_config = {
-        .format_if_mount_failed = false,
-        .max_files = 5,
-        .allocation_unit_size = 16 * 1024
-    };
+    esp_vfs_fat_sdmmc_mount_config_t mount_config = {};
+    mount_config.format_if_mount_failed = false;
+    mount_config.max_files = 5;
+    mount_config.allocation_unit_size = 16 * 1024;
 
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
     // Use high speed SPI (20MHz+) as requested
     host.max_freq_khz = 20000;
 
-    spi_bus_config_t bus_cfg = {
-        .mosi_io_num = SD_MOSI_PIN,
-        .miso_io_num = SD_MISO_PIN,
-        .sclk_io_num = SD_SCK_PIN,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
-        .max_transfer_sz = 4000,
-    };
+    spi_bus_config_t bus_cfg = {};
+    bus_cfg.mosi_io_num = SD_MOSI_PIN;
+    bus_cfg.miso_io_num = SD_MISO_PIN;
+    bus_cfg.sclk_io_num = SD_SCK_PIN;
+    bus_cfg.quadwp_io_num = -1;
+    bus_cfg.quadhd_io_num = -1;
+    bus_cfg.max_transfer_sz = 4000;
     esp_err_t ret = spi_bus_initialize((spi_host_device_t)host.slot, &bus_cfg, SPI_DMA_CH_AUTO);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize SPI bus.");
@@ -290,22 +287,11 @@ static void lvgl_touch_read_cb(lv_indev_t * indev, lv_indev_data_t * data) {
     data->state = LV_INDEV_STATE_RELEASED;
 }
 
-static void btn_event_cb(lv_event_t * e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    if(code == LV_EVENT_CLICKED) {
-        ESP_LOGI(TAG, "Button clicked!");
-    }
-}
 
 void lvgl_init_task(void *arg) {
     ESP_LOGI(TAG, "Starting LVGL task...");
     lv_init();
     lv_tick_set_cb(lvgl_tick_cb);
-
-    // Image Cache Configuration: Use PSRAM for decoded images
-    // In LVGL 9, we can set the image cache size.
-    // We also want to ensure decoded images end up in PSRAM.
-    lv_image_cache_set_size(4 * 1024 * 1024); // 4MB cache is plenty for this screen
 
     // Allocate draw buffers in internal SRAM for performance
     uint32_t buffer_size = LCD_H_RES * 60;
