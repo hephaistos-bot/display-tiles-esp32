@@ -31,7 +31,6 @@ build/
 sdkconfig
 sdkconfig.old
 sdkconfig.backup
-!managed_components/lvgl__lvgl/env_support/cmake/esp.cmake
 managed_components/
 dependencies.lock
 *.tmp
