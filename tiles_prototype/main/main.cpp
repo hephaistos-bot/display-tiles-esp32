@@ -287,12 +287,6 @@ static void lvgl_touch_read_cb(lv_indev_t * indev, lv_indev_data_t * data) {
     data->state = LV_INDEV_STATE_RELEASED;
 }
 
-static void btn_event_cb(lv_event_t * e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    if(code == LV_EVENT_CLICKED) {
-        ESP_LOGI(TAG, "Button clicked!");
-    }
-}
 
 void lvgl_init_task(void *arg) {
     ESP_LOGI(TAG, "Starting LVGL task...");
