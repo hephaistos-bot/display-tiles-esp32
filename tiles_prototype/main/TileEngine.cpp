@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdio>
 #include "esp_log.h"
+#include "esp_timer.h"
 
 static const char* TAG = "TileEngine";
 
@@ -38,6 +39,7 @@ void TileEngine::latLonToTile(double lat, double lon, int zoom, double& x, doubl
 }
 
 void TileEngine::updateTiles(double lat, double lon, int zoom) {
+    int64_t start_time = esp_timer_get_time();
     double tile_x, tile_y;
     latLonToTile(lat, lon, zoom, tile_x, tile_y);
 
@@ -86,4 +88,6 @@ void TileEngine::updateTiles(double lat, double lon, int zoom) {
             }
         }
     }
+    int64_t end_time = esp_timer_get_time();
+    ESP_LOGI(TAG, "Map tiles updated in %lld us", (end_time - start_time));
 }
