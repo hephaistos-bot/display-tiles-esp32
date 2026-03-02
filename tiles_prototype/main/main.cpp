@@ -93,7 +93,7 @@ extern "C" void app_main(void) {
 
     // 2. Setup LVGL Synchronization and Task
     lvgl_mux = xSemaphoreCreateRecursiveMutex();
-    xTaskCreate(lvgl_init_task, "LVGL", 1024 * 16, NULL, 5, NULL);
+    xTaskCreate(lvgl_init_task, "LVGL", 1024 * 32, NULL, 5, NULL);
 }
 
 void hardware_init(void) {

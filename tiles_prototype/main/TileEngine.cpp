@@ -81,9 +81,9 @@ void TileEngine::updateTiles(double lat, double lon, int zoom) {
                 tile.y_idx = tile_idx_y;
                 tile.zoom = zoom;
 
-                // Important: Each tile must have its own persistent path string buffer
-                // and the path must include the mount point '/sdcard'
-                snprintf(tile.path, sizeof(tile.path), "S:/sdcard/tiles/%d/%d/%d.png", zoom, tile_idx_x, tile_idx_y);
+                // Important: Each tile must have its own persistent path string buffer.
+                // In LVGL FatFS, drive letter 'S' maps directly to the SD card root.
+                snprintf(tile.path, sizeof(tile.path), "S:/tiles/%d/%d/%d.png", zoom, tile_idx_x, tile_idx_y);
                 lv_image_set_src(tile.img_obj, tile.path);
             }
         }
