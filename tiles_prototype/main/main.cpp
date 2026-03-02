@@ -77,7 +77,7 @@ void hardware_init(void);
 esp_err_t init_sd_card(void);
 void lvgl_init_task(void *arg);
 
-void app_main(void) {
+extern "C" void app_main(void) {
     // 1. Initialize core hardware (I2C, CH422G, LCD, Touch)
     hardware_init();
 
