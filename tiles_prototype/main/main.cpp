@@ -30,14 +30,9 @@ static const char *TAG = "TILES_PROTOTYPE";
 
 // --- CH422G EXIO Bit Mapping (Waveshare 5-inch Board) ---
 #define CH422G_EXIO_LCD_RST  (1 << 0) // Bit 0: LCD Reset (Active LOW)
+#define CH422G_EXIO_TP_RST   (1 << 1) // Bit 1: Touch Reset (Active LOW)
+#define CH422G_EXIO_DISP     (1 << 2) // Bit 2: Display Backlight (Active LOW for ON)
 #define CH422G_EXIO_SD_CS    (1 << 4) // Bit 4: SD Card Chip Select (Active LOW)
-
-// --- CH422G OC (Open Collector) Bit Mapping ---
-// Based on working example:
-// 0x2C (Reset: TP_RST=0, DISP=1)
-// 0x2E (Normal: TP_RST=1, DISP=1)
-#define CH422G_OC_TP_RST     (1 << 1) // Bit 1: Touch Reset
-#define CH422G_OC_DISP       (1 << 2) // Bit 2: Display Backlight
 
 // --- RGB LCD Settings (800x480) ---
 #define LCD_H_RES            800
@@ -77,6 +72,16 @@ void hardware_init(void);
 esp_err_t init_sd_card(void);
 void lvgl_init_task(void *arg);
 
+void i2c_scan(void) {
+    ESP_LOGI(TAG, "Scanning I2C bus...");
+    for (uint8_t i = 1; i < 127; i++) {
+        esp_err_t ret = i2c_master_probe(i2c_bus, i, 200);
+        if (ret == ESP_OK) {
+            ESP_LOGI(TAG, "Found device at address 0x%02X", i);
+        }
+    }
+}
+
 extern "C" void app_main(void) {
     // 1. Initialize core hardware (I2C, CH422G, LCD, Touch)
     hardware_init();
@@ -107,33 +112,35 @@ void hardware_init(void) {
     // Enable both EXIO and OC outputs (0x01 | 0x04)
     ESP_ERROR_CHECK(ch422g_set_config(0x05));
 
-    // Reset and Backlight Control
-    ESP_LOGI(TAG, "Resetting Display and Touch...");
+    // --- GT911 Reset Sequence for Address 0x5D ---
+    // According to GT911 datasheet:
+    // To select address 0x5D: Reset=0, INT=0 (hold >100us) -> Reset=1 (hold >5ms)
+    ESP_LOGI(TAG, "Performing GT911 Reset Sequence (Address 0x5D)...");
 
-    // 1. Initial State for EXIO: LCD_RST Active (0), SD_CS Inactive (1)
-    ch422g_write_output(CH422G_EXIO_SD_CS);
+    gpio_config_t tp_int_conf = {};
+    tp_int_conf.pin_bit_mask = (1ULL << TP_INT_PIN);
+    tp_int_conf.mode = GPIO_MODE_OUTPUT;
+    tp_int_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+    tp_int_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    ESP_ERROR_CHECK(gpio_config(&tp_int_conf));
 
-    // 2. Initial State for OC: 0x2C (TP_RST=0, DISP=1)
-    ch422g_write_od(0x2C);
-    vTaskDelay(pdMS_TO_TICKS(100));
+    // 1. Hold Reset Low, Hold INT Low, DISP=0 (ON)
+    ESP_ERROR_CHECK(gpio_set_level((gpio_num_t)TP_INT_PIN, 0));
+    ESP_ERROR_CHECK(ch422g_write_output(CH422G_EXIO_LCD_RST)); // TP_RST=0, DISP=0 (ON)
+    vTaskDelay(pdMS_TO_TICKS(10));
 
-    // 3. Release LCD Reset (EXIO Bit 0)
-    ch422g_write_output(CH422G_EXIO_SD_CS | CH422G_EXIO_LCD_RST);
-    vTaskDelay(pdMS_TO_TICKS(100));
+    // 2. Release Reset, Keep INT Low
+    ESP_ERROR_CHECK(ch422g_write_output(CH422G_EXIO_LCD_RST | CH422G_EXIO_TP_RST)); // TP_RST=1, DISP=0 (ON)
+    vTaskDelay(pdMS_TO_TICKS(10));
 
-    // 4. GT911 Reset Sequence for Address 0x5D
-    ESP_LOGI(TAG, "GT911 Reset Sequence...");
-    gpio_config_t io_conf = {};
-    io_conf.intr_type = GPIO_INTR_DISABLE;
-    io_conf.mode = GPIO_MODE_OUTPUT;
-    io_conf.pin_bit_mask = (1ULL << TP_INT_PIN);
-    gpio_config(&io_conf);
-    gpio_set_level((gpio_num_t)TP_INT_PIN, 0);
-    vTaskDelay(pdMS_TO_TICKS(100));
-
-    // Release Touch Reset (OC Bit 1) -> 0x2E
-    ch422g_write_od(0x2E);
+    // 3. Set INT back to Input
+    tp_int_conf.mode = GPIO_MODE_INPUT;
+    tp_int_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+    ESP_ERROR_CHECK(gpio_config(&tp_int_conf));
     vTaskDelay(pdMS_TO_TICKS(200));
+
+    // Diagnostics
+    i2c_scan();
 
     // RGB LCD Initialization
     ESP_LOGI(TAG, "Initializing RGB LCD Panel...");
@@ -172,28 +179,64 @@ void hardware_init(void) {
     ESP_LOGI(TAG, "LCD RGB panel initialized successfully.");
 
     // GT911 Initialization
-    ESP_LOGI(TAG, "Initializing GT911 Touch Controller...");
+    uint16_t tp_addr = 0x5D;
+    uint8_t prod_id[4] = {0};
+    esp_lcd_panel_io_i2c_config_t probe_io_conf = {};
+    probe_io_conf.dev_addr = 0x5D;
+    probe_io_conf.control_phase_bytes = 1;
+    probe_io_conf.lcd_cmd_bits = 16;
+    probe_io_conf.flags.disable_control_phase = 1;
+    probe_io_conf.scl_speed_hz = 100000;
+
+    esp_lcd_panel_io_handle_t probe_io = NULL;
+
+    ESP_LOGI(TAG, "Probing GT911...");
+    if (esp_lcd_new_panel_io_i2c(i2c_bus, &probe_io_conf, &probe_io) == ESP_OK) {
+        if (esp_lcd_panel_io_rx_param(probe_io, 0x8140, prod_id, 3) == ESP_OK) {
+            ESP_LOGI(TAG, "GT911 detected at 0x5D. ID: %c%c%c", prod_id[0], prod_id[1], prod_id[2]);
+            tp_addr = 0x5D;
+        } else {
+            ESP_LOGW(TAG, "GT911 not at 0x5D, trying 0x14...");
+            probe_io_conf.dev_addr = 0x14;
+            esp_lcd_panel_io_del(probe_io);
+            if (esp_lcd_new_panel_io_i2c(i2c_bus, &probe_io_conf, &probe_io) == ESP_OK) {
+                if (esp_lcd_panel_io_rx_param(probe_io, 0x8140, prod_id, 3) == ESP_OK) {
+                    ESP_LOGI(TAG, "GT911 detected at 0x14. ID: %c%c%c", prod_id[0], prod_id[1], prod_id[2]);
+                    tp_addr = 0x14;
+                } else {
+                    ESP_LOGE(TAG, "GT911 not detected!");
+                }
+            }
+        }
+        if (probe_io) esp_lcd_panel_io_del(probe_io);
+    }
+
+    ESP_LOGI(TAG, "Initializing GT911 driver at 0x%02X...", tp_addr);
     esp_lcd_panel_io_i2c_config_t tp_io_config = {};
-    tp_io_config.dev_addr = 0x5D;
-    tp_io_config.scl_speed_hz = 400000;
+    tp_io_config.dev_addr = tp_addr;
+    tp_io_config.scl_speed_hz = 100000;
     tp_io_config.control_phase_bytes = 1;
-    tp_io_config.dc_bit_offset = 0;
-    tp_io_config.lcd_param_bits = 0;
+    tp_io_config.lcd_cmd_bits = 16;
     tp_io_config.flags.disable_control_phase = 1;
 
     esp_lcd_panel_io_handle_t tp_io_handle = NULL;
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_bus, &tp_io_config, &tp_io_handle));
 
+    static esp_lcd_touch_io_gt911_config_t gt911_dev_conf;
+    gt911_dev_conf.dev_addr = tp_addr;
+
     esp_lcd_touch_config_t tp_cfg = {};
     tp_cfg.x_max = LCD_H_RES;
     tp_cfg.y_max = LCD_V_RES;
-    tp_cfg.rst_gpio_num = (gpio_num_t)-1; // Managed via CH422G OC
+    tp_cfg.rst_gpio_num = (gpio_num_t)-1; // Managed via CH422G
     tp_cfg.int_gpio_num = (gpio_num_t)TP_INT_PIN;
     tp_cfg.levels.reset = 0;
     tp_cfg.levels.interrupt = 0;
     tp_cfg.flags.swap_xy = 0;
     tp_cfg.flags.mirror_x = 0;
     tp_cfg.flags.mirror_y = 0;
+    tp_cfg.driver_data = &gt911_dev_conf;
+
     ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_gt911(tp_io_handle, &tp_cfg, &tp_handle));
     ESP_LOGI(TAG, "Touch controller initialized successfully.");
 
@@ -232,9 +275,11 @@ esp_err_t init_sd_card(void) {
 
     // Reliability: Toggling SD_CS (High -> Delay -> Low) prior to mounting
     ESP_LOGI(TAG, "Toggling SD_CS via CH422G...");
-    ch422g_write_output(CH422G_EXIO_SD_CS | CH422G_EXIO_LCD_RST); // High (Inactive)
+    // Update to use restored bit mapping: SD_CS=1<<4, LCD_RST=1<<0, TP_RST=1<<1, DISP=1<<2
+    // We want SD_CS high, others can stay as they are (usually active/enabled)
+    ch422g_write_output(CH422G_EXIO_SD_CS | CH422G_EXIO_LCD_RST | CH422G_EXIO_TP_RST); // High (Inactive), DISP=0 (ON)
     vTaskDelay(pdMS_TO_TICKS(50));
-    ch422g_write_output(CH422G_EXIO_LCD_RST); // Low (Active)
+    ch422g_write_output(CH422G_EXIO_LCD_RST | CH422G_EXIO_TP_RST); // Low (Active), DISP=0 (ON)
     vTaskDelay(pdMS_TO_TICKS(50));
 
     ret = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_config, &mount_config, &card);
