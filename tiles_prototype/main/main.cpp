@@ -120,7 +120,7 @@ void hardware_init(void) {
     // Reset and Backlight Control
     ESP_LOGI(TAG, "Resetting Display and Touch (Commit 663ebdf Logic)...");
 
-    // 1. Initial State: Hold INT Low, LCD_RST Active (0), SD_CS Inactive (1)
+    // 1. Initial State for EXIO: LCD_RST Active (0), SD_CS Inactive (1)
     ch422g_write_output(CH422G_EXIO_SD_CS);
 
     // 2. Initial State for OC: 0x2C (TP_RST=0, DISP=1)
@@ -140,7 +140,7 @@ void hardware_init(void) {
     ch422g_write_output(CH422G_EXIO_SD_CS | CH422G_EXIO_LCD_RST);
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    // 4. Release Touch Reset (OC Bit 1) -> 0x2E
+    // 4. GT911 Reset Release to Address 0x5D (OC Bit 1) -> 0x2E
     ch422g_write_od(0x2E);
     vTaskDelay(pdMS_TO_TICKS(10)); // Hold INT Low for 10ms after TP_RST high
 
