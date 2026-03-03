@@ -5,6 +5,8 @@
 #include <vector>
 #include <string>
 
+#define TILE_DEBUG 1
+
 class TileEngine {
 public:
     TileEngine();
@@ -12,6 +14,7 @@ public:
 
     void init();
     void setMapCenter(double lat, double lon, int zoom);
+    void debug(double lat, double lon, int zoom);
 
 private:
     struct TileInfo {

@@ -91,3 +91,67 @@ void TileEngine::updateTiles(double lat, double lon, int zoom) {
     int64_t end_time = esp_timer_get_time();
     ESP_LOGI(TAG, "Map tiles updated in %lld us", (end_time - start_time));
 }
+
+#if TILE_DEBUG
+void TileEngine::debug(double lat, double lon, int zoom) {
+    ESP_LOGI(TAG, "--- Tile Engine Debug Start (Lat: %f, Lon: %f, Zoom: %d) ---", lat, lon, zoom);
+
+    double tile_x, tile_y;
+    latLonToTile(lat, lon, zoom, tile_x, tile_y);
+
+    double center_pixel_x = tile_x * TILE_SIZE;
+    double center_pixel_y = tile_y * TILE_SIZE;
+
+    int screen_tl_x = (int)(center_pixel_x - (SCREEN_WIDTH / 2));
+    int screen_tl_y = (int)(center_pixel_y - (SCREEN_HEIGHT / 2));
+
+    int base_tile_x = (int)std::floor((double)screen_tl_x / TILE_SIZE);
+    int base_tile_y = (int)std::floor((double)screen_tl_y / TILE_SIZE);
+
+    ESP_LOGI(TAG, "Screen Top-Left Pixel: %d, %d", screen_tl_x, screen_tl_y);
+    ESP_LOGI(TAG, "Base Tile Indices: X=%d, Y=%d", base_tile_x, base_tile_y);
+
+    int total_found = 0;
+    int total_valid = 0;
+
+    for (int r = 0; r < GRID_ROWS; ++r) {
+        for (int c = 0; c < GRID_COLS; ++c) {
+            int tile_idx_x = base_tile_x + c;
+            int tile_idx_y = base_tile_y + r;
+            char full_path[128];
+
+            // Format for standard C file operations (using mount point /sdcard)
+            snprintf(full_path, sizeof(full_path), "/sdcard/tiles/%d/%d/%d.png", zoom, tile_idx_x, tile_idx_y);
+
+            FILE* f = fopen(full_path, "rb");
+            if (f) {
+                total_found++;
+                fseek(f, 0, SEEK_END);
+                long size = ftell(f);
+                fseek(f, 0, SEEK_SET);
+
+                unsigned char header[8];
+                bool signature_ok = false;
+                if (fread(header, 1, 8, f) == 8) {
+                    // PNG Signature: 89 50 4E 47 0D 0A 1A 0A
+                    if (header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47 &&
+                        header[4] == 0x0D && header[5] == 0x0A && header[6] == 0x1A && header[7] == 0x0A) {
+                        signature_ok = true;
+                        total_valid++;
+                    }
+                }
+                fclose(f);
+
+                ESP_LOGI(TAG, "Tile [%d,%d] - FOUND - Path: %s, Size: %ld bytes, PNG Header: %s",
+                         tile_idx_x, tile_idx_y, full_path, size, signature_ok ? "OK" : "INVALID");
+            } else {
+                ESP_LOGE(TAG, "Tile [%d,%d] - MISSING - Path: %s", tile_idx_x, tile_idx_y, full_path);
+            }
+        }
+    }
+
+    ESP_LOGI(TAG, "Summary: %d/%d tiles found, %d/%d tiles have valid PNG signature.",
+             total_found, GRID_ROWS * GRID_COLS, total_valid, total_found);
+    ESP_LOGI(TAG, "--- Tile Engine Debug End ---");
+}
+#endif
