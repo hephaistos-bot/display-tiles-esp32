@@ -2,6 +2,7 @@
 #include "TileEngine.hpp"
 #include <cmath>
 #include <cstdio>
+#include <dirent.h>
 #include "esp_log.h"
 #include "esp_timer.h"
 
@@ -36,6 +37,14 @@ void TileEngine::latLonToTile(double lat, double lon, int zoom, double& x, doubl
     x = (lon + 180.0) / 360.0 * n;
     double lat_rad = lat * M_PI / 180.0;
     y = (1.0 - std::log(std::tan(lat_rad) + (1.0 / std::cos(lat_rad))) / M_PI) / 2.0 * n;
+}
+
+void TileEngine::getTilePath(char* buf, size_t buf_size, int zoom, int x, int y, bool for_lvgl) {
+    if (for_lvgl) {
+        snprintf(buf, buf_size, "%s%s/%d/%d/%d.png", LV_DRIVE_PREFIX, TILE_PATH_BASE, zoom, x, y);
+    } else {
+        snprintf(buf, buf_size, "%s/%d/%d/%d.png", TILE_PATH_BASE, zoom, x, y);
+    }
 }
 
 void TileEngine::updateTiles(double lat, double lon, int zoom) {
@@ -82,8 +91,7 @@ void TileEngine::updateTiles(double lat, double lon, int zoom) {
                 tile.zoom = zoom;
 
                 // Important: Each tile must have its own persistent path string buffer
-                // and the path must include the mount point '/sdcard'
-                snprintf(tile.path, sizeof(tile.path), "S:/sdcard/tiles/%d/%d/%d.png", zoom, tile_idx_x, tile_idx_y);
+                getTilePath(tile.path, sizeof(tile.path), zoom, tile_idx_x, tile_idx_y, true);
                 lv_image_set_src(tile.img_obj, tile.path);
             }
         }
@@ -91,3 +99,90 @@ void TileEngine::updateTiles(double lat, double lon, int zoom) {
     int64_t end_time = esp_timer_get_time();
     ESP_LOGI(TAG, "Map tiles updated in %lld us", (end_time - start_time));
 }
+
+#if TILE_DEBUG
+void TileEngine::debug(double lat, double lon, int zoom) {
+    ESP_LOGI(TAG, "--- Tile Engine Debug Start (Lat: %f, Lon: %f, Zoom: %d) ---", lat, lon, zoom);
+
+    // 1. Check if the SD card is mounted at the VFS level
+    DIR* dir = opendir(TILE_PATH_BASE);
+    if (dir) {
+        ESP_LOGI(TAG, "VFS CHECK: SUCCESS - Path '%s' is accessible.", TILE_PATH_BASE);
+        closedir(dir);
+    } else {
+        ESP_LOGE(TAG, "VFS CHECK: FAILED - Path '%s' is NOT accessible. Is the SD card mounted?", TILE_PATH_BASE);
+    }
+
+    // 2. Check if the LVGL drive 'S:' is usable
+    lv_fs_dir_t lv_dir;
+    char root_path[8];
+    snprintf(root_path, sizeof(root_path), "%s/", LV_DRIVE_PREFIX);
+    lv_fs_res_t res = lv_fs_dir_open(&lv_dir, root_path);
+    if (res == LV_FS_RES_OK) {
+        ESP_LOGI(TAG, "LVGL FS CHECK: SUCCESS - Drive '%s' is usable.", LV_DRIVE_PREFIX);
+        lv_fs_dir_close(&lv_dir);
+    } else {
+        ESP_LOGE(TAG, "LVGL FS CHECK: FAILED - Drive '%s' is NOT usable (Error: %d). Check LVGL FatFS config.", LV_DRIVE_PREFIX, res);
+    }
+
+    double tile_x, tile_y;
+    latLonToTile(lat, lon, zoom, tile_x, tile_y);
+
+    double center_pixel_x = tile_x * TILE_SIZE;
+    double center_pixel_y = tile_y * TILE_SIZE;
+
+    int screen_tl_x = (int)(center_pixel_x - (SCREEN_WIDTH / 2));
+    int screen_tl_y = (int)(center_pixel_y - (SCREEN_HEIGHT / 2));
+
+    int base_tile_x = (int)std::floor((double)screen_tl_x / TILE_SIZE);
+    int base_tile_y = (int)std::floor((double)screen_tl_y / TILE_SIZE);
+
+    ESP_LOGI(TAG, "Screen Top-Left Pixel: %d, %d", screen_tl_x, screen_tl_y);
+    ESP_LOGI(TAG, "Base Tile Indices: X=%d, Y=%d", base_tile_x, base_tile_y);
+
+    int total_found = 0;
+    int total_valid = 0;
+
+    for (int r = 0; r < GRID_ROWS; ++r) {
+        for (int c = 0; c < GRID_COLS; ++c) {
+            int tile_idx_x = base_tile_x + c;
+            int tile_idx_y = base_tile_y + r;
+            char full_path[128];
+
+            getTilePath(full_path, sizeof(full_path), zoom, tile_idx_x, tile_idx_y, false);
+
+            FILE* f = fopen(full_path, "rb");
+            if (f) {
+                total_found++;
+                fseek(f, 0, SEEK_END);
+                long size = ftell(f);
+                fseek(f, 0, SEEK_SET);
+
+                unsigned char header[8];
+                bool signature_ok = false;
+                if (fread(header, 1, 8, f) == 8) {
+                    // PNG Signature: 89 50 4E 47 0D 0A 1A 0A
+                    if (header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47 &&
+                        header[4] == 0x0D && header[5] == 0x0A && header[6] == 0x1A && header[7] == 0x0A) {
+                        signature_ok = true;
+                        total_valid++;
+                    }
+                }
+                fclose(f);
+
+                char lv_path[128];
+                getTilePath(lv_path, sizeof(lv_path), zoom, tile_idx_x, tile_idx_y, true);
+
+                ESP_LOGI(TAG, "Tile [%d,%d] - FOUND - Path: %s (LVGL: %s), Size: %ld bytes, PNG Header: %s",
+                         tile_idx_x, tile_idx_y, full_path, lv_path, size, signature_ok ? "OK" : "INVALID");
+            } else {
+                ESP_LOGE(TAG, "Tile [%d,%d] - MISSING - Path: %s", tile_idx_x, tile_idx_y, full_path);
+            }
+        }
+    }
+
+    ESP_LOGI(TAG, "Summary: %d/%d tiles found, %d/%d tiles have valid PNG signature.",
+             total_found, GRID_ROWS * GRID_COLS, total_valid, total_found);
+    ESP_LOGI(TAG, "--- Tile Engine Debug End ---");
+}
+#endif

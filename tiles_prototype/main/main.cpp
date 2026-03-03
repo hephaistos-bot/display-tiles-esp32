@@ -364,6 +364,11 @@ void lvgl_init_task(void *arg) {
     // Initialize Tile Engine
     static TileEngine engine;
     engine.init();
+
+#if TILE_DEBUG
+    engine.debug(0.0, 0.0, 5);
+#endif
+
     engine.setMapCenter(0.0, 0.0, 5); // Test Case: Equator
 
     ESP_LOGI(TAG, "LVGL initialization complete. Entering main loop...");

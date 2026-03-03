@@ -5,6 +5,8 @@
 #include <vector>
 #include <string>
 
+#define TILE_DEBUG 1
+
 class TileEngine {
 public:
     TileEngine();
@@ -12,6 +14,7 @@ public:
 
     void init();
     void setMapCenter(double lat, double lon, int zoom);
+    void debug(double lat, double lon, int zoom);
 
 private:
     struct TileInfo {
@@ -27,12 +30,15 @@ private:
     static constexpr int GRID_ROWS = 4;
     static constexpr int SCREEN_WIDTH = 800;
     static constexpr int SCREEN_HEIGHT = 480;
+    static constexpr const char* TILE_PATH_BASE = "/sdcard/tiles";
+    static constexpr const char* LV_DRIVE_PREFIX = "S:";
 
     lv_obj_t* _map_container;
     std::vector<TileInfo> _tile_grid;
 
     void updateTiles(double lat, double lon, int zoom);
     void latLonToTile(double lat, double lon, int zoom, double& x, double& y);
+    void getTilePath(char* buf, size_t buf_size, int zoom, int x, int y, bool for_lvgl);
 };
 
 #endif // TILE_ENGINE_HPP
