@@ -38,6 +38,14 @@ void TileEngine::latLonToTile(double lat, double lon, int zoom, double& x, doubl
     y = (1.0 - std::log(std::tan(lat_rad) + (1.0 / std::cos(lat_rad))) / M_PI) / 2.0 * n;
 }
 
+void TileEngine::getTilePath(char* buf, size_t buf_size, int zoom, int x, int y, bool for_lvgl) {
+    if (for_lvgl) {
+        snprintf(buf, buf_size, "%s%s/%d/%d/%d.png", LV_DRIVE_PREFIX, TILE_PATH_BASE, zoom, x, y);
+    } else {
+        snprintf(buf, buf_size, "%s/%d/%d/%d.png", TILE_PATH_BASE, zoom, x, y);
+    }
+}
+
 void TileEngine::updateTiles(double lat, double lon, int zoom) {
     int64_t start_time = esp_timer_get_time();
     double tile_x, tile_y;
@@ -82,8 +90,7 @@ void TileEngine::updateTiles(double lat, double lon, int zoom) {
                 tile.zoom = zoom;
 
                 // Important: Each tile must have its own persistent path string buffer
-                // and the path must include the mount point '/sdcard'
-                snprintf(tile.path, sizeof(tile.path), "S:/sdcard/tiles/%d/%d/%d.png", zoom, tile_idx_x, tile_idx_y);
+                getTilePath(tile.path, sizeof(tile.path), zoom, tile_idx_x, tile_idx_y, true);
                 lv_image_set_src(tile.img_obj, tile.path);
             }
         }
@@ -120,8 +127,7 @@ void TileEngine::debug(double lat, double lon, int zoom) {
             int tile_idx_y = base_tile_y + r;
             char full_path[128];
 
-            // Format for standard C file operations (using mount point /sdcard)
-            snprintf(full_path, sizeof(full_path), "/sdcard/tiles/%d/%d/%d.png", zoom, tile_idx_x, tile_idx_y);
+            getTilePath(full_path, sizeof(full_path), zoom, tile_idx_x, tile_idx_y, false);
 
             FILE* f = fopen(full_path, "rb");
             if (f) {
