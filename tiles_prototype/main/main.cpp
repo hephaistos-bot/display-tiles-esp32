@@ -113,7 +113,6 @@ void hardware_init(void) {
     ESP_ERROR_CHECK(ch422g_set_config(0x05));
 
     // --- GT911 Standard Reset Sequence (Commit 663ebdf compatibility) ---
-    // According to successful hardware logs, address 0x5D is preferred.
     ESP_LOGI(TAG, "Performing GT911 Reset Sequence...");
 
     gpio_config_t tp_int_conf = {};
@@ -123,31 +122,21 @@ void hardware_init(void) {
     tp_int_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     ESP_ERROR_CHECK(gpio_config(&tp_int_conf));
 
-    // 1. Hold Reset Low, Hold INT Low, DISP ON
+    // 1. Hold Reset Low, Hold INT Low
     ESP_ERROR_CHECK(gpio_set_level((gpio_num_t)TP_INT_PIN, 0));
-
-    // EXIO: LCD_RST=1, TP_RST=0, DISP=0 (ON), SD_CS=1 (Inactive) -> 0x11
-    ESP_ERROR_CHECK(ch422g_write_output(0x11));
-
-    // OC: TP_RST=0, DISP=1 (ON) + Other bits for stability -> 0x2C
-    ESP_ERROR_CHECK(ch422g_write_od(0x2C));
-
+    // EXIO: LCD_RST=1, TP_RST=0, DISP=0/ON, SD_CS=1/Inactive (0x11)
+    ESP_ERROR_CHECK(ch422g_write_output(CH422G_EXIO_LCD_RST | CH422G_EXIO_SD_CS));
     vTaskDelay(pdMS_TO_TICKS(100));
 
     // 2. Release Reset, Keep INT Low
-    // EXIO: LCD_RST=1, TP_RST=1, DISP=0, SD_CS=1 -> 0x13
-    ESP_ERROR_CHECK(ch422g_write_output(0x13));
-
-    // OC: TP_RST=1, DISP=1 -> 0x2E
-    ESP_ERROR_CHECK(ch422g_write_od(0x2E));
-
+    // EXIO: LCD_RST=1, TP_RST=1, DISP=0/ON, SD_CS=1/Inactive (0x13)
+    ESP_ERROR_CHECK(ch422g_write_output(CH422G_EXIO_LCD_RST | CH422G_EXIO_TP_RST | CH422G_EXIO_SD_CS));
     vTaskDelay(pdMS_TO_TICKS(10));
 
-    // 3. Set INT to Input (High-Impedance)
+    // 3. Set INT to Input
     tp_int_conf.mode = GPIO_MODE_INPUT;
-    tp_int_conf.pull_up_en = GPIO_PULLUP_ENABLE; // Enable pull-up for stability
+    tp_int_conf.pull_up_en = GPIO_PULLUP_DISABLE;
     ESP_ERROR_CHECK(gpio_config(&tp_int_conf));
-
     vTaskDelay(pdMS_TO_TICKS(200));
 
     // Diagnostics
@@ -197,46 +186,44 @@ void hardware_init(void) {
     probe_io_conf.control_phase_bytes = 1;
     probe_io_conf.lcd_cmd_bits = 16;
     probe_io_conf.flags.disable_control_phase = 1;
-    probe_io_conf.scl_speed_hz = 100000; // Use 100kHz for discovery
+    probe_io_conf.scl_speed_hz = 400000;
 
     esp_lcd_panel_io_handle_t probe_io = NULL;
 
     ESP_LOGI(TAG, "Probing GT911...");
-    // Attempt multiple reads for robustness
-    for (int retry = 0; retry < 3; retry++) {
-        if (esp_lcd_new_panel_io_i2c(i2c_bus, &probe_io_conf, &probe_io) == ESP_OK) {
-            if (esp_lcd_panel_io_rx_param(probe_io, 0x8140, prod_id, 3) == ESP_OK) {
-                ESP_LOGI(TAG, "GT911 detected at 0x5D. ID: %c%c%c", prod_id[0], prod_id[1], prod_id[2]);
-                tp_addr = 0x5D;
-                esp_lcd_panel_io_del(probe_io);
-                break;
-            }
-            esp_lcd_panel_io_del(probe_io);
-        }
+    uint16_t probe_addrs[] = {0x5D, 0x14};
+    bool detected = false;
 
-        if (retry == 2) {
-            ESP_LOGW(TAG, "GT911 not at 0x5D, trying 0x14...");
-            probe_io_conf.dev_addr = 0x14;
-            for (int retry2 = 0; retry2 < 3; retry2++) {
+    for (int i = 0; i < 2 && !detected; i++) {
+        probe_io_conf.dev_addr = probe_addrs[i];
+        for (int retry = 0; retry < 3; retry++) {
+            if (i2c_master_probe(i2c_bus, probe_io_conf.dev_addr, 200) == ESP_OK) {
                 if (esp_lcd_new_panel_io_i2c(i2c_bus, &probe_io_conf, &probe_io) == ESP_OK) {
                     if (esp_lcd_panel_io_rx_param(probe_io, 0x8140, prod_id, 3) == ESP_OK) {
-                        ESP_LOGI(TAG, "GT911 detected at 0x14. ID: %c%c%c", prod_id[0], prod_id[1], prod_id[2]);
-                        tp_addr = 0x14;
+                        ESP_LOGI(TAG, "GT911 detected at 0x%02X. ID: %c%c%c", probe_io_conf.dev_addr, prod_id[0], prod_id[1], prod_id[2]);
+                        tp_addr = probe_io_conf.dev_addr;
+                        detected = true;
                         esp_lcd_panel_io_del(probe_io);
                         break;
                     }
                     esp_lcd_panel_io_del(probe_io);
                 }
-                vTaskDelay(pdMS_TO_TICKS(50));
             }
+            vTaskDelay(pdMS_TO_TICKS(50));
         }
-        vTaskDelay(pdMS_TO_TICKS(50));
+        if (!detected && i == 0) {
+            ESP_LOGW(TAG, "GT911 not at 0x5D, trying 0x14...");
+        }
+    }
+
+    if (!detected) {
+        ESP_LOGE(TAG, "GT911 not detected on any address!");
     }
 
     ESP_LOGI(TAG, "Initializing GT911 driver at 0x%02X...", tp_addr);
     esp_lcd_panel_io_i2c_config_t tp_io_config = {};
     tp_io_config.dev_addr = tp_addr;
-    tp_io_config.scl_speed_hz = 100000;
+    tp_io_config.scl_speed_hz = 400000;
     tp_io_config.control_phase_bytes = 1;
     tp_io_config.lcd_cmd_bits = 16;
     tp_io_config.flags.disable_control_phase = 1;
