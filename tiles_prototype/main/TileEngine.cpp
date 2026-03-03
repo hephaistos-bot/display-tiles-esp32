@@ -2,6 +2,7 @@
 #include "TileEngine.hpp"
 #include <cmath>
 #include <cstdio>
+#include <dirent.h>
 #include "esp_log.h"
 #include "esp_timer.h"
 
@@ -103,6 +104,25 @@ void TileEngine::updateTiles(double lat, double lon, int zoom) {
 void TileEngine::debug(double lat, double lon, int zoom) {
     ESP_LOGI(TAG, "--- Tile Engine Debug Start (Lat: %f, Lon: %f, Zoom: %d) ---", lat, lon, zoom);
 
+    // 1. Check if the SD card is mounted at the VFS level
+    DIR* dir = opendir(TILE_PATH_BASE);
+    if (dir) {
+        ESP_LOGI(TAG, "VFS CHECK: SUCCESS - Path '%s' is accessible.", TILE_PATH_BASE);
+        closedir(dir);
+    } else {
+        ESP_LOGE(TAG, "VFS CHECK: FAILED - Path '%s' is NOT accessible. Is the SD card mounted?", TILE_PATH_BASE);
+    }
+
+    // 2. Check if the LVGL drive 'S:' is usable
+    lv_fs_dir_t lv_dir;
+    lv_fs_res_t res = lv_fs_dir_open(&lv_dir, LV_DRIVE_PREFIX "/");
+    if (res == LV_FS_RES_OK) {
+        ESP_LOGI(TAG, "LVGL FS CHECK: SUCCESS - Drive '%s' is usable.", LV_DRIVE_PREFIX);
+        lv_fs_dir_close(&lv_dir);
+    } else {
+        ESP_LOGE(TAG, "LVGL FS CHECK: FAILED - Drive '%s' is NOT usable (Error: %d). Check LVGL FatFS config.", LV_DRIVE_PREFIX, res);
+    }
+
     double tile_x, tile_y;
     latLonToTile(lat, lon, zoom, tile_x, tile_y);
 
@@ -148,8 +168,11 @@ void TileEngine::debug(double lat, double lon, int zoom) {
                 }
                 fclose(f);
 
-                ESP_LOGI(TAG, "Tile [%d,%d] - FOUND - Path: %s, Size: %ld bytes, PNG Header: %s",
-                         tile_idx_x, tile_idx_y, full_path, size, signature_ok ? "OK" : "INVALID");
+                char lv_path[128];
+                getTilePath(lv_path, sizeof(lv_path), zoom, tile_idx_x, tile_idx_y, true);
+
+                ESP_LOGI(TAG, "Tile [%d,%d] - FOUND - Path: %s (LVGL: %s), Size: %ld bytes, PNG Header: %s",
+                         tile_idx_x, tile_idx_y, full_path, lv_path, size, signature_ok ? "OK" : "INVALID");
             } else {
                 ESP_LOGE(TAG, "Tile [%d,%d] - MISSING - Path: %s", tile_idx_x, tile_idx_y, full_path);
             }
