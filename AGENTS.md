@@ -16,7 +16,7 @@ The ESP32-S3's 16-bit RGB interface consumes nearly all available GPIOs. To mana
 * **Expected Speed:** 400 kHz (Fast Mode).
   * *Note:* While the CH422G supports 1 MHz, the GT911 and PCF85063 RTC are rated for 400 kHz. Running the bus at 400 kHz ensures stability across all shared devices.
 * **Component Addresses:**
-  * **CH422G (IO Expander):** 0x24 (Set Output), 0x20 (Set System)
+  * **CH422G (IO Expander):** 0x24 (Config), 0x27 (EXIO), 0x38 (DO/OC)
   * **GT911 (Touch Controller):** 0x5D (Default) or 0x14
   * **PCF85063 (RTC):** 0x51
 
@@ -42,12 +42,24 @@ The CH422G manages the board's "housekeeping" signals. You must implement an I2C
 
 | Pin | Label | Function | Requirement |
 |---|---|---|---|
+| EXIO0 | DI0 | Isolated Input 0 | Digital Input 0. |
 | EXIO1 | TP_RST | Touch Reset | Pulse LOW then HIGH to wake GT911. |
 | EXIO2 | DISP | Backlight/Disp EN | Set HIGH to enable screen backlight. |
 | EXIO3 | LCD_RST | LCD Reset | Pulse LOW then HIGH to initialize RGB panel. |
 | EXIO4 | SD_CS | SD Chip Select | Pull LOW for SD operations; HIGH to release. |
+| EXIO5 | DI1 | Isolated Input 1 | Digital Input 1. |
+| EXIO6 | - | Reserved | Unassigned/No connection on standard 5" rev. |
+| EXIO7 | - | Reserved | Unassigned/No connection on standard 5" rev. |
 
 ## 4. Hardware Implementation Guide
+
+### Isolated I/O (DI / DO)
+The board features optically isolated inputs and open-drain outputs accessible via the terminal block.
+
+* **Digital Inputs (DI0, DI1):** Mapped to **EXIO0** and **EXIO5**. These support 5V–36V signals (NPN/PNP compatible via common terminal).
+* **Digital Outputs (DO0, DO1):** Mapped to the CH422G **OC0** and **OC1** pins (Open-Drain).
+  * **Electrical Specs:** Supports **5V–36V DC**, up to **450mA** sink current per channel.
+  * **Software Control:** Controlled via I2C address **0x38**. Writing a `1` to the corresponding bit enables the output (sinks current to GND). Bit 0 = DO0, Bit 1 = DO1.
 
 ### Screen Backlight
 * **Control Type:** Binary (ON/OFF) via CH422G EXIO2.
@@ -71,4 +83,4 @@ Because SDA/SCL are on GPIO 8/9, avoid using these pins for the RGB data bus. In
 
 * **Memory:** Always allocate LVGL frame buffers in PSRAM using `MALLOC_CAP_SPIRAM` due to the large memory footprint of 800x480 resolution.
 * **LVGL 9.4:** Use the new `lv_display_set_flush_cb` with the `esp_lcd_panel_draw_bitmap` function.
-* **Isolated IO:** The digital outputs (5-36V) are also mapped to the remaining EXIO pins on the CH422G. Check your specific board revision for the exact bit-mapping of the isolated output terminals.
+* **CH422G Addresses:** Use `0x27` for EXIO byte-write, `0x38` for DO (OC) byte-write, and `0x24` for system configuration.
