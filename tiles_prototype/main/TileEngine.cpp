@@ -115,7 +115,9 @@ void TileEngine::debug(double lat, double lon, int zoom) {
 
     // 2. Check if the LVGL drive 'S:' is usable
     lv_fs_dir_t lv_dir;
-    lv_fs_res_t res = lv_fs_dir_open(&lv_dir, LV_DRIVE_PREFIX "/");
+    char root_path[8];
+    snprintf(root_path, sizeof(root_path), "%s/", LV_DRIVE_PREFIX);
+    lv_fs_res_t res = lv_fs_dir_open(&lv_dir, root_path);
     if (res == LV_FS_RES_OK) {
         ESP_LOGI(TAG, "LVGL FS CHECK: SUCCESS - Drive '%s' is usable.", LV_DRIVE_PREFIX);
         lv_fs_dir_close(&lv_dir);
