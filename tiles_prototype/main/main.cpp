@@ -93,13 +93,13 @@ extern "C" void app_main(void) {
 
 void hardware_init(void) {
     // Hardware needs time to settle after power-up
-    ESP_LOGI(TAG, "Hardware stabilization (2.5s)...");
-    vTaskDelay(pdMS_TO_TICKS(2500));
+    ESP_LOGI(TAG, "Hardware stabilization (1.5s)...");
+    vTaskDelay(pdMS_TO_TICKS(1500));
 
     // I2C Bus Initialization
     i2c_master_bus_config_t i2c_bus_conf = {};
     i2c_bus_conf.clk_source = I2C_CLK_SRC_DEFAULT;
-    i2c_bus_conf.i2c_port = 0;
+    i2c_bus_conf.i2c_port = -1;
     i2c_bus_conf.sda_io_num = (gpio_num_t)I2C_SDA_PIN;
     i2c_bus_conf.scl_io_num = (gpio_num_t)I2C_SCL_PIN;
     i2c_bus_conf.glitch_ignore_cnt = 7;
@@ -112,7 +112,7 @@ void hardware_init(void) {
     // Enable both EXIO and OC outputs (0x01 | 0x04)
     ESP_ERROR_CHECK(ch422g_set_config(0x05));
 
-    // --- GT911 Universal "Shotgun" Reset Sequence ---
+    // --- GT911 Reset Sequence (Initial Commit Logic) ---
     ESP_LOGI(TAG, "Performing GT911 Reset Sequence...");
 
     gpio_config_t tp_int_conf = {};
@@ -124,29 +124,20 @@ void hardware_init(void) {
 
     // 1. Hold Reset Low, Hold INT Low
     ESP_ERROR_CHECK(gpio_set_level((gpio_num_t)TP_INT_PIN, 0));
+    // EXIO: TP_RST=0, LCD_RST=1, DISP=0 (ON)
+    ESP_ERROR_CHECK(ch422g_write_output(CH422G_EXIO_LCD_RST));
+    vTaskDelay(pdMS_TO_TICKS(10));
 
-    // Shotgun: Toggle reset on both potential expander registers (EXIO and OC)
-    // EXIO: 0x11 (LCD_RST=1, TP_RST=0, DISP=0/ON, SD_CS=1/Inactive)
-    ESP_ERROR_CHECK(ch422g_write_output(0x11));
-    // OC: 0x2C (TP_RST=0, DISP=1/ON)
-    ESP_ERROR_CHECK(ch422g_write_od(0x2C));
+    // 2. Release Reset, Keep INT Low
+    // EXIO: TP_RST=1, LCD_RST=1, DISP=0 (ON)
+    ESP_ERROR_CHECK(ch422g_write_output(CH422G_EXIO_LCD_RST | CH422G_EXIO_TP_RST));
+    vTaskDelay(pdMS_TO_TICKS(10));
 
-    vTaskDelay(pdMS_TO_TICKS(150));
-
-    // 2. Release Reset, Keep INT Low (to select 0x5D)
-    // EXIO: 0x13 (LCD_RST=1, TP_RST=1, DISP=0/ON, SD_CS=1/Inactive)
-    ESP_ERROR_CHECK(ch422g_write_output(0x13));
-    // OC: 0x2E (TP_RST=1, DISP=1/ON)
-    ESP_ERROR_CHECK(ch422g_write_od(0x2E));
-
-    vTaskDelay(pdMS_TO_TICKS(15)); // GT911 needs INT low for >5ms after Reset rise
-
-    // 3. Set INT to floating Input
+    // 3. Set INT back to Input
     tp_int_conf.mode = GPIO_MODE_INPUT;
-    tp_int_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+    tp_int_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     ESP_ERROR_CHECK(gpio_config(&tp_int_conf));
-
-    vTaskDelay(pdMS_TO_TICKS(250));
+    vTaskDelay(pdMS_TO_TICKS(200));
 
     // Diagnostics
     i2c_scan();
