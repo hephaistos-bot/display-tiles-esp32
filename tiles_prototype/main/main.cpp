@@ -125,10 +125,10 @@ void hardware_init(void) {
 
     // Helper for bit-wise OC operations
     auto oc_bit_op = [&](uint8_t base_addr, uint8_t bit) {
-        i2c_device_config_t cfg = {
-            .device_address = (uint16_t)(base_addr | bit),
-            .scl_speed_hz = 100000
-        };
+        i2c_device_config_t cfg = {}; // Zero-initialize to satisfy -Werror=missing-field-initializers
+        cfg.device_address = (uint16_t)(base_addr | bit);
+        cfg.scl_speed_hz = 100000;
+
         i2c_master_dev_handle_t hdl;
         if (i2c_master_bus_add_device(i2c_bus, &cfg, &hdl) == ESP_OK) {
             i2c_master_transmit(hdl, NULL, 0, 100);
