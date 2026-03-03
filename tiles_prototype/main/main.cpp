@@ -93,13 +93,13 @@ extern "C" void app_main(void) {
 
 void hardware_init(void) {
     // Hardware needs time to settle after power-up
-    ESP_LOGI(TAG, "Hardware stabilization (1.5s)...");
-    vTaskDelay(pdMS_TO_TICKS(1500));
+    ESP_LOGI(TAG, "Hardware stabilization (2.5s)...");
+    vTaskDelay(pdMS_TO_TICKS(2500));
 
     // I2C Bus Initialization
     i2c_master_bus_config_t i2c_bus_conf = {};
     i2c_bus_conf.clk_source = I2C_CLK_SRC_DEFAULT;
-    i2c_bus_conf.i2c_port = -1;
+    i2c_bus_conf.i2c_port = 0;
     i2c_bus_conf.sda_io_num = (gpio_num_t)I2C_SDA_PIN;
     i2c_bus_conf.scl_io_num = (gpio_num_t)I2C_SCL_PIN;
     i2c_bus_conf.glitch_ignore_cnt = 7;
@@ -112,8 +112,8 @@ void hardware_init(void) {
     // Enable both EXIO and OC outputs (0x01 | 0x04)
     ESP_ERROR_CHECK(ch422g_set_config(0x05));
 
-    // --- GT911 Reset Sequence for Address 0x5D ---
-    ESP_LOGI(TAG, "Performing GT911 Reset Sequence (Address 0x5D)...");
+    // --- GT911 Universal "Shotgun" Reset Sequence ---
+    ESP_LOGI(TAG, "Performing GT911 Reset Sequence...");
 
     gpio_config_t tp_int_conf = {};
     tp_int_conf.pin_bit_mask = (1ULL << TP_INT_PIN);
@@ -122,13 +122,15 @@ void hardware_init(void) {
     tp_int_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     ESP_ERROR_CHECK(gpio_config(&tp_int_conf));
 
-    // 1. Hold Reset Low, Hold INT Low, DISP=0 (ON)
+    // 1. Hold Reset Low, Hold INT Low
     ESP_ERROR_CHECK(gpio_set_level((gpio_num_t)TP_INT_PIN, 0));
-    ESP_ERROR_CHECK(ch422g_write_output(CH422G_EXIO_LCD_RST | CH422G_EXIO_SD_CS)); // TP_RST=0, DISP=0 (ON)
+    // EXIO: 0x01 (LCD_RST=1, TP_RST=0, DISP=0/ON)
+    ESP_ERROR_CHECK(ch422g_write_output(CH422G_EXIO_LCD_RST));
     vTaskDelay(pdMS_TO_TICKS(10));
 
     // 2. Release Reset, Keep INT Low
-    ESP_ERROR_CHECK(ch422g_write_output(CH422G_EXIO_LCD_RST | CH422G_EXIO_TP_RST | CH422G_EXIO_SD_CS)); // TP_RST=1, DISP=0 (ON)
+    // EXIO: 0x03 (LCD_RST=1, TP_RST=1, DISP=0/ON)
+    ESP_ERROR_CHECK(ch422g_write_output(CH422G_EXIO_LCD_RST | CH422G_EXIO_TP_RST));
     vTaskDelay(pdMS_TO_TICKS(10));
 
     // 3. Set INT back to Input
