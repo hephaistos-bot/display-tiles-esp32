@@ -113,8 +113,7 @@ void hardware_init(void) {
     ESP_ERROR_CHECK(ch422g_set_config(0x05));
 
     // --- GT911 Reset Sequence for Address 0x5D ---
-    // According to GT911 datasheet:
-    // To select address 0x5D: Reset=0, INT=0 (hold >100us) -> Reset=1 (hold >5ms)
+    // Universal Reset: We toggle both EXIO and OC registers to support different board revisions.
     ESP_LOGI(TAG, "Performing GT911 Reset Sequence (Address 0x5D)...");
 
     gpio_config_t tp_int_conf = {};
@@ -124,19 +123,33 @@ void hardware_init(void) {
     tp_int_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     ESP_ERROR_CHECK(gpio_config(&tp_int_conf));
 
-    // 1. Hold Reset Low, Hold INT Low, DISP=0 (ON)
+    // 1. Hold Reset Low, Hold INT Low
     ESP_ERROR_CHECK(gpio_set_level((gpio_num_t)TP_INT_PIN, 0));
-    ESP_ERROR_CHECK(ch422g_write_output(CH422G_EXIO_LCD_RST)); // TP_RST=0, DISP=0 (ON)
-    vTaskDelay(pdMS_TO_TICKS(10));
+
+    // EXIO: LCD_RST=1, TP_RST=0, DISP=0 (ON), SD_CS=1 (Inactive)
+    ESP_ERROR_CHECK(ch422g_write_output(CH422G_EXIO_LCD_RST | CH422G_EXIO_SD_CS));
+
+    // OC: TP_RST=0, DISP=1 (ON)
+    // Following memory suggestion for OC: 0x2C (TP_RST=0, DISP=1)
+    ESP_ERROR_CHECK(ch422g_write_od(0x2C));
+
+    vTaskDelay(pdMS_TO_TICKS(150)); // Hold reset for 150ms
 
     // 2. Release Reset, Keep INT Low
-    ESP_ERROR_CHECK(ch422g_write_output(CH422G_EXIO_LCD_RST | CH422G_EXIO_TP_RST)); // TP_RST=1, DISP=0 (ON)
-    vTaskDelay(pdMS_TO_TICKS(10));
+    // EXIO: LCD_RST=1, TP_RST=1, DISP=0, SD_CS=1
+    ESP_ERROR_CHECK(ch422g_write_output(CH422G_EXIO_LCD_RST | CH422G_EXIO_TP_RST | CH422G_EXIO_SD_CS));
+
+    // OC: TP_RST=1, DISP=1 -> 0x2E
+    ESP_ERROR_CHECK(ch422g_write_od(0x2E));
+
+    vTaskDelay(pdMS_TO_TICKS(50));
 
     // 3. Set INT back to Input
     tp_int_conf.mode = GPIO_MODE_INPUT;
     tp_int_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     ESP_ERROR_CHECK(gpio_config(&tp_int_conf));
+
+    // Wait for GT911 to boot up
     vTaskDelay(pdMS_TO_TICKS(200));
 
     // Diagnostics
@@ -186,7 +199,7 @@ void hardware_init(void) {
     probe_io_conf.control_phase_bytes = 1;
     probe_io_conf.lcd_cmd_bits = 16;
     probe_io_conf.flags.disable_control_phase = 1;
-    probe_io_conf.scl_speed_hz = 100000;
+    probe_io_conf.scl_speed_hz = 400000;
 
     esp_lcd_panel_io_handle_t probe_io = NULL;
 
@@ -214,7 +227,7 @@ void hardware_init(void) {
     ESP_LOGI(TAG, "Initializing GT911 driver at 0x%02X...", tp_addr);
     esp_lcd_panel_io_i2c_config_t tp_io_config = {};
     tp_io_config.dev_addr = tp_addr;
-    tp_io_config.scl_speed_hz = 100000;
+    tp_io_config.scl_speed_hz = 400000;
     tp_io_config.control_phase_bytes = 1;
     tp_io_config.lcd_cmd_bits = 16;
     tp_io_config.flags.disable_control_phase = 1;
@@ -277,9 +290,9 @@ esp_err_t init_sd_card(void) {
     ESP_LOGI(TAG, "Toggling SD_CS via CH422G...");
     // Update to use restored bit mapping: SD_CS=1<<4, LCD_RST=1<<0, TP_RST=1<<1, DISP=1<<2
     // We want SD_CS high, others can stay as they are (usually active/enabled)
-    ch422g_write_output(CH422G_EXIO_SD_CS | CH422G_EXIO_LCD_RST | CH422G_EXIO_TP_RST); // High (Inactive), DISP=0 (ON)
+    ESP_ERROR_CHECK(ch422g_write_output(CH422G_EXIO_SD_CS | CH422G_EXIO_LCD_RST | CH422G_EXIO_TP_RST)); // High (Inactive), DISP=0 (ON)
     vTaskDelay(pdMS_TO_TICKS(50));
-    ch422g_write_output(CH422G_EXIO_LCD_RST | CH422G_EXIO_TP_RST); // Low (Active), DISP=0 (ON)
+    ESP_ERROR_CHECK(ch422g_write_output(CH422G_EXIO_LCD_RST | CH422G_EXIO_TP_RST)); // Low (Active), DISP=0 (ON)
     vTaskDelay(pdMS_TO_TICKS(50));
 
     ret = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_config, &mount_config, &card);
