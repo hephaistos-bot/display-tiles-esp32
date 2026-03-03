@@ -93,8 +93,8 @@ extern "C" void app_main(void) {
 
 void hardware_init(void) {
     // Hardware needs time to settle after power-up
-    ESP_LOGI(TAG, "Hardware stabilization (3.0s)...");
-    vTaskDelay(pdMS_TO_TICKS(3000));
+    ESP_LOGI(TAG, "Hardware stabilization (1.5s)...");
+    vTaskDelay(pdMS_TO_TICKS(1500));
 
     // I2C Bus Initialization
     i2c_master_bus_config_t i2c_bus_conf = {};
@@ -112,9 +112,8 @@ void hardware_init(void) {
     // Enable both EXIO and OC outputs (0x01 | 0x04)
     ESP_ERROR_CHECK(ch422g_set_config(0x05));
 
-    // --- GT911 "Shotgun" Reset Sequence ---
-    // Target both potential registers and addresses for maximum compatibility.
-    ESP_LOGI(TAG, "Performing GT911 Reset Sequence...");
+    // --- GT911 Reset Sequence for Address 0x5D ---
+    ESP_LOGI(TAG, "Performing GT911 Reset Sequence (Address 0x5D)...");
 
     gpio_config_t tp_int_conf = {};
     tp_int_conf.pin_bit_mask = (1ULL << TP_INT_PIN);
@@ -123,47 +122,20 @@ void hardware_init(void) {
     tp_int_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     ESP_ERROR_CHECK(gpio_config(&tp_int_conf));
 
-    // Helper for bit-wise OC operations
-    auto oc_bit_op = [&](uint8_t base_addr, uint8_t bit) {
-        i2c_device_config_t cfg = {}; // Zero-initialize to satisfy -Werror=missing-field-initializers
-        cfg.device_address = (uint16_t)(base_addr | bit);
-        cfg.scl_speed_hz = 100000;
-
-        i2c_master_dev_handle_t hdl;
-        if (i2c_master_bus_add_device(i2c_bus, &cfg, &hdl) == ESP_OK) {
-            i2c_master_transmit(hdl, NULL, 0, 100);
-            i2c_master_bus_rm_device(hdl);
-        }
-    };
-
-    // 1. Hold Reset Low, Hold INT Low
+    // 1. Hold Reset Low, Hold INT Low, DISP=0 (ON)
     ESP_ERROR_CHECK(gpio_set_level((gpio_num_t)TP_INT_PIN, 0));
+    ESP_ERROR_CHECK(ch422g_write_output(CH422G_EXIO_LCD_RST | CH422G_EXIO_SD_CS)); // TP_RST=0, DISP=0 (ON)
+    vTaskDelay(pdMS_TO_TICKS(10));
 
-    // EXIO: 0x11 (LCD_RST=1, TP_RST=0, DISP=0/ON, SD_CS=1/Inactive)
-    ESP_ERROR_CHECK(ch422g_write_output(0x11));
+    // 2. Release Reset, Keep INT Low
+    ESP_ERROR_CHECK(ch422g_write_output(CH422G_EXIO_LCD_RST | CH422G_EXIO_TP_RST | CH422G_EXIO_SD_CS)); // TP_RST=1, DISP=0 (ON)
+    vTaskDelay(pdMS_TO_TICKS(10));
 
-    // OC Bit-wise: Clear Bit 1 (TP_RST), Set Bit 2 (DISP)
-    oc_bit_op(0x30, 1); // Clear Bit 1
-    oc_bit_op(0x38, 2); // Set Bit 2
-
-    vTaskDelay(pdMS_TO_TICKS(150));
-
-    // 2. Release Reset, Keep INT Low (to select 0x5D)
-    // EXIO: 0x13 (LCD_RST=1, TP_RST=1, DISP=0/ON, SD_CS=1/Inactive)
-    ESP_ERROR_CHECK(ch422g_write_output(0x13));
-
-    // OC Bit-wise: Set Bit 1 (TP_RST)
-    oc_bit_op(0x38, 1); // Set Bit 1
-
-    // GT911 requires INT to be held low for at least 5ms after Reset goes high
-    vTaskDelay(pdMS_TO_TICKS(15));
-
-    // 3. Set INT back to floating Input
+    // 3. Set INT back to Input
     tp_int_conf.mode = GPIO_MODE_INPUT;
-    tp_int_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+    tp_int_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     ESP_ERROR_CHECK(gpio_config(&tp_int_conf));
-
-    vTaskDelay(pdMS_TO_TICKS(250));
+    vTaskDelay(pdMS_TO_TICKS(200));
 
     // Diagnostics
     i2c_scan();
@@ -212,44 +184,35 @@ void hardware_init(void) {
     probe_io_conf.control_phase_bytes = 1;
     probe_io_conf.lcd_cmd_bits = 16;
     probe_io_conf.flags.disable_control_phase = 1;
-    probe_io_conf.scl_speed_hz = 100000; // Probe at 100kHz
+    probe_io_conf.scl_speed_hz = 100000;
 
     esp_lcd_panel_io_handle_t probe_io = NULL;
 
     ESP_LOGI(TAG, "Probing GT911...");
-    uint16_t probe_addrs[] = {0x5D, 0x14};
-    bool detected = false;
-
-    for (int i = 0; i < 2 && !detected; i++) {
-        probe_io_conf.dev_addr = probe_addrs[i];
-        for (int retry = 0; retry < 3; retry++) {
-            if (i2c_master_probe(i2c_bus, probe_io_conf.dev_addr, 200) == ESP_OK) {
-                if (esp_lcd_new_panel_io_i2c(i2c_bus, &probe_io_conf, &probe_io) == ESP_OK) {
-                    if (esp_lcd_panel_io_rx_param(probe_io, 0x8140, prod_id, 3) == ESP_OK) {
-                        ESP_LOGI(TAG, "GT911 detected at 0x%02X. ID: %c%c%c", probe_io_conf.dev_addr, prod_id[0], prod_id[1], prod_id[2]);
-                        tp_addr = probe_io_conf.dev_addr;
-                        detected = true;
-                        esp_lcd_panel_io_del(probe_io);
-                        break;
-                    }
-                    esp_lcd_panel_io_del(probe_io);
+    if (esp_lcd_new_panel_io_i2c(i2c_bus, &probe_io_conf, &probe_io) == ESP_OK) {
+        if (esp_lcd_panel_io_rx_param(probe_io, 0x8140, prod_id, 3) == ESP_OK) {
+            ESP_LOGI(TAG, "GT911 detected at 0x5D. ID: %c%c%c", prod_id[0], prod_id[1], prod_id[2]);
+            tp_addr = 0x5D;
+        } else {
+            ESP_LOGW(TAG, "GT911 not at 0x5D, trying 0x14...");
+            probe_io_conf.dev_addr = 0x14;
+            esp_lcd_panel_io_del(probe_io);
+            if (esp_lcd_new_panel_io_i2c(i2c_bus, &probe_io_conf, &probe_io) == ESP_OK) {
+                if (esp_lcd_panel_io_rx_param(probe_io, 0x8140, prod_id, 3) == ESP_OK) {
+                    ESP_LOGI(TAG, "GT911 detected at 0x14. ID: %c%c%c", prod_id[0], prod_id[1], prod_id[2]);
+                    tp_addr = 0x14;
+                } else {
+                    ESP_LOGE(TAG, "GT911 not detected!");
                 }
             }
-            vTaskDelay(pdMS_TO_TICKS(100));
         }
-        if (!detected && i == 0) {
-            ESP_LOGW(TAG, "GT911 not at 0x5D, trying 0x14...");
-        }
-    }
-
-    if (!detected) {
-        ESP_LOGE(TAG, "GT911 not detected on any address!");
+        if (probe_io) esp_lcd_panel_io_del(probe_io);
     }
 
     ESP_LOGI(TAG, "Initializing GT911 driver at 0x%02X...", tp_addr);
     esp_lcd_panel_io_i2c_config_t tp_io_config = {};
     tp_io_config.dev_addr = tp_addr;
-    tp_io_config.scl_speed_hz = 400000; // Restore to 400kHz for operation
+    tp_io_config.scl_speed_hz = 100000;
     tp_io_config.control_phase_bytes = 1;
     tp_io_config.lcd_cmd_bits = 16;
     tp_io_config.flags.disable_control_phase = 1;
