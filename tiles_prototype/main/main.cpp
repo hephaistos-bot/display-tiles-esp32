@@ -12,6 +12,7 @@
 #include "esp_log.h"
 #include "lvgl.h"
 #include "ch422g.h"
+#include "CH422GController.hpp"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
 #include "driver/sdspi_host.h"
@@ -63,6 +64,7 @@ static const char *TAG = "TILES_PROTOTYPE";
 
 // Global Handles
 i2c_master_bus_handle_t i2c_bus = NULL;
+CH422GController *ch422g_controller = nullptr;
 esp_lcd_panel_handle_t lcd_panel = NULL;
 esp_lcd_touch_handle_t tp_handle = NULL;
 SemaphoreHandle_t lvgl_mux = NULL;
@@ -111,6 +113,10 @@ void hardware_init(void) {
     ESP_ERROR_CHECK(ch422g_init(i2c_bus));
     // Enable both EXIO and OC outputs (0x01 | 0x04)
     ESP_ERROR_CHECK(ch422g_set_config(0x05));
+
+    // CH422G C++ Controller Initialization
+    ch422g_controller = new CH422GController(i2c_bus);
+    ESP_ERROR_CHECK(ch422g_controller->init());
 
     // --- GT911 Reset Sequence for Address 0x5D ---
     // According to GT911 datasheet:
