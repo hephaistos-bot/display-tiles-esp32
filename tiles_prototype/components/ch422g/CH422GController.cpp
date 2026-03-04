@@ -1,8 +1,6 @@
 #include "CH422GController.hpp"
 #include "esp_log.h"
 
-static const char *TAG = "CH422GController";
-
 CH422GController::CH422GController(i2c_master_bus_handle_t bus_handle,
                                    uint8_t addr_config,
                                    uint8_t addr_exio,
