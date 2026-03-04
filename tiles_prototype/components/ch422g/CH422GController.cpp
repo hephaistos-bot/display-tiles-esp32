@@ -18,11 +18,10 @@ CH422GController::~CH422GController() {
 }
 
 esp_err_t CH422GController::init() {
-    i2c_device_config_t dev_cfg = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = m_addr_config,
-        .scl_speed_hz = 400000,
-    };
+    i2c_device_config_t dev_cfg = {};
+    dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+    dev_cfg.device_address = m_addr_config;
+    dev_cfg.scl_speed_hz = 400000;
 
     esp_err_t ret = i2c_master_bus_add_device(m_bus_handle, &dev_cfg, &m_dev_config);
     if (ret != ESP_OK) return ret;
