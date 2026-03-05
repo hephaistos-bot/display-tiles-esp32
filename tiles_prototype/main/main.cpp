@@ -11,7 +11,6 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "lvgl.h"
-#include "ch422g.h"
 #include "CH422GController.hpp"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
@@ -28,12 +27,6 @@ static const char *TAG = "TILES_PROTOTYPE";
 #define SD_MOSI_PIN          11
 #define SD_SCK_PIN           12
 #define SD_MISO_PIN          13
-
-// --- CH422G EXIO Bit Mapping (Waveshare 5-inch Board) ---
-#define CH422G_EXIO_LCD_RST  (1 << 0) // Bit 0: LCD Reset (Active LOW)
-#define CH422G_EXIO_TP_RST   (1 << 1) // Bit 1: Touch Reset (Active LOW)
-#define CH422G_EXIO_DISP     (1 << 2) // Bit 2: Display Backlight (Active LOW for ON)
-#define CH422G_EXIO_SD_CS    (1 << 4) // Bit 4: SD Card Chip Select (Active LOW)
 
 // --- RGB LCD Settings (800x480) ---
 #define LCD_H_RES            800
@@ -110,13 +103,13 @@ void hardware_init(void) {
 
     // CH422G IO Expander Initialization
     ESP_LOGI(TAG, "Initializing CH422G...");
-    ESP_ERROR_CHECK(ch422g_init(i2c_bus));
-    // Enable both EXIO and OC outputs (0x01 | 0x04)
-    ESP_ERROR_CHECK(ch422g_set_config(0x05));
-
-    // CH422G C++ Controller Initialization
     ch422g_controller = new CH422GController(i2c_bus);
     ESP_ERROR_CHECK(ch422g_controller->init());
+
+    // Set known safe state: Backlight ON, Resets Released, SD CS De-selected
+    // (TP_RST=1, DISP=1, LCD_RST=1, SD_CS=1 -> 0x1E)
+    ch422g_controller->setEXIOInitialState(0x1E);
+    ESP_ERROR_CHECK(ch422g_controller->setBacklight(true));
 
     // --- GT911 Reset Sequence for Address 0x5D ---
     // According to GT911 datasheet:
@@ -130,13 +123,13 @@ void hardware_init(void) {
     tp_int_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     ESP_ERROR_CHECK(gpio_config(&tp_int_conf));
 
-    // 1. Hold Reset Low, Hold INT Low, DISP=0 (ON)
+    // 1. Hold Reset Low, Hold INT Low
     ESP_ERROR_CHECK(gpio_set_level((gpio_num_t)TP_INT_PIN, 0));
-    ESP_ERROR_CHECK(ch422g_write_output(CH422G_EXIO_LCD_RST)); // TP_RST=0, DISP=0 (ON)
+    ESP_ERROR_CHECK(ch422g_controller->setTouchReset(true)); // Active LOW
     vTaskDelay(pdMS_TO_TICKS(10));
 
     // 2. Release Reset, Keep INT Low
-    ESP_ERROR_CHECK(ch422g_write_output(CH422G_EXIO_LCD_RST | CH422G_EXIO_TP_RST)); // TP_RST=1, DISP=0 (ON)
+    ESP_ERROR_CHECK(ch422g_controller->setTouchReset(false)); // Release
     vTaskDelay(pdMS_TO_TICKS(10));
 
     // 3. Set INT back to Input
@@ -281,11 +274,9 @@ esp_err_t init_sd_card(void) {
 
     // Reliability: Toggling SD_CS (High -> Delay -> Low) prior to mounting
     ESP_LOGI(TAG, "Toggling SD_CS via CH422G...");
-    // Update to use restored bit mapping: SD_CS=1<<4, LCD_RST=1<<0, TP_RST=1<<1, DISP=1<<2
-    // We want SD_CS high, others can stay as they are (usually active/enabled)
-    ch422g_write_output(CH422G_EXIO_SD_CS | CH422G_EXIO_LCD_RST | CH422G_EXIO_TP_RST); // High (Inactive), DISP=0 (ON)
+    ESP_ERROR_CHECK(ch422g_controller->setSDCardSelected(false)); // High (Inactive)
     vTaskDelay(pdMS_TO_TICKS(50));
-    ch422g_write_output(CH422G_EXIO_LCD_RST | CH422G_EXIO_TP_RST); // Low (Active), DISP=0 (ON)
+    ESP_ERROR_CHECK(ch422g_controller->setSDCardSelected(true)); // Low (Active)
     vTaskDelay(pdMS_TO_TICKS(50));
 
     ret = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_config, &mount_config, &card);
