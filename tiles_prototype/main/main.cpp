@@ -78,12 +78,81 @@ void i2c_scan(void) {
 }
 
 extern "C" void app_main(void) {
-    // 1. Initialize core hardware (I2C, CH422G, LCD, Touch)
+    esp_log_level_set("sdmmc_init", ESP_LOG_VERBOSE);
+    esp_log_level_set("sdmmc_cmd", ESP_LOG_VERBOSE);
+    esp_log_level_set("sdspi_host", ESP_LOG_VERBOSE);
+    esp_log_level_set("spi_master", ESP_LOG_VERBOSE);
+        // 1. Initialize core hardware (I2C, CH422G, LCD, Touch)
     hardware_init();
 
     // 2. Setup LVGL Synchronization and Task
     lvgl_mux = xSemaphoreCreateRecursiveMutex();
     xTaskCreate(lvgl_init_task, "LVGL", 1024 * 16, NULL, 5, NULL);
+}
+
+    i2c_master_dev_handle_t dev_handle_24; // Pour l'adresse 0x24
+    i2c_master_dev_handle_t dev_handle_38; // Pour l'adresse 0x38
+
+esp_err_t init_ch422g_backlight1() {
+    uint8_t data;
+
+    // Configure CH422G to output mode (Adresse 0x24)
+    data = 0x01;
+    ESP_ERROR_CHECK(i2c_master_transmit(dev_handle_24, &data, 1, -1));
+
+    // Pull the backlight pin high (Adresse 0x38)
+    data = 0x1E;
+    ESP_ERROR_CHECK(i2c_master_transmit(dev_handle_38, &data, 1, -1));
+
+    return ESP_OK;
+}
+esp_err_t init_ch422g_backlight0() {
+    uint8_t data;
+
+    // Configure CH422G to output mode (Adresse 0x24)
+    data = 0x01;
+    ESP_ERROR_CHECK(i2c_master_transmit(dev_handle_24, &data, 1, -1));
+
+    // Pull the backlight pin high (Adresse 0x38)
+    data = 0x1A;
+    ESP_ERROR_CHECK(i2c_master_transmit(dev_handle_38, &data, 1, -1));
+
+    return ESP_OK;
+}
+
+void test() {
+    
+    // Ajout des "devices" (le CH422G utilise plusieurs adresses pour ses fonctions)
+    i2c_device_config_t dev_cfg_24 = {};
+    dev_cfg_24.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+    dev_cfg_24.device_address = 0x24;
+    dev_cfg_24.scl_speed_hz = 400000;
+
+    i2c_device_config_t dev_cfg_38 = {};
+    dev_cfg_38.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+    dev_cfg_38.device_address = 0x38;
+    dev_cfg_38.scl_speed_hz = 400000;
+    
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(i2c_bus, &dev_cfg_24, &dev_handle_24));
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(i2c_bus, &dev_cfg_38, &dev_handle_38));
+ ESP_LOGI(TAG, "Testing expander: Backlight OFF");
+    init_ch422g_backlight1();
+vTaskDelay(pdMS_TO_TICKS(5000));
+ESP_LOGI(TAG, "Testing expander: Backlight ON");
+    init_ch422g_backlight0();
+vTaskDelay(pdMS_TO_TICKS(5000));
+ ESP_LOGI(TAG, "Testing expander: Backlight OFF");
+    init_ch422g_backlight1();
+vTaskDelay(pdMS_TO_TICKS(5000));
+ESP_LOGI(TAG, "Testing expander: Backlight ON");
+    init_ch422g_backlight0();
+vTaskDelay(pdMS_TO_TICKS(5000));
+ ESP_LOGI(TAG, "Testing expander: Backlight OFF");
+    init_ch422g_backlight1();
+vTaskDelay(pdMS_TO_TICKS(5000));
+ESP_LOGI(TAG, "Testing expander: Backlight ON");
+    init_ch422g_backlight0();
+vTaskDelay(pdMS_TO_TICKS(5000));
 }
 
 void hardware_init(void) {
@@ -94,12 +163,13 @@ void hardware_init(void) {
     // I2C Bus Initialization
     i2c_master_bus_config_t i2c_bus_conf = {};
     i2c_bus_conf.clk_source = I2C_CLK_SRC_DEFAULT;
-    i2c_bus_conf.i2c_port = -1;
+    i2c_bus_conf.i2c_port = I2C_NUM_0;
     i2c_bus_conf.sda_io_num = (gpio_num_t)I2C_SDA_PIN;
     i2c_bus_conf.scl_io_num = (gpio_num_t)I2C_SCL_PIN;
     i2c_bus_conf.glitch_ignore_cnt = 7;
     i2c_bus_conf.flags.enable_internal_pullup = true;
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_conf, &i2c_bus));
+//test();
 
     // CH422G IO Expander Initialization
     ESP_LOGI(TAG, "Initializing CH422G...");
@@ -129,7 +199,6 @@ ch422g_controller->setBacklight(true);
 vTaskDelay(pdMS_TO_TICKS(5000));
 ESP_LOGI(TAG, "Testing expander: Backlight OFF");
 ch422g_controller->setBacklight(false);
-vTaskDelay(pdMS_TO_TICKS(5000));
 
     // Set known safe state: Backlight ON, Resets Released, SD CS De-selected
     // (TP_RST=1, DISP=1, LCD_RST=1, SD_CS=1 -> 0x1E)
@@ -264,55 +333,70 @@ vTaskDelay(pdMS_TO_TICKS(5000));
     ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_gt911(tp_io_handle, &tp_cfg, &tp_handle));
     ESP_LOGI(TAG, "Touch controller initialized successfully.");
 
-    // SD Card Initialization
+   // SD Card Initialization
     ESP_ERROR_CHECK(init_sd_card());
 }
 
 esp_err_t init_sd_card(void) {
-    ESP_LOGI(TAG, "Initializing SD card (SPI)");
+    ESP_LOGI(TAG, "Starting manual SD wake-up sequence...");
 
     esp_vfs_fat_sdmmc_mount_config_t mount_config = {};
     mount_config.format_if_mount_failed = false;
     mount_config.max_files = 5;
     mount_config.allocation_unit_size = 16 * 1024;
+    
+    // 1. S'assurer que le CS est HAUT (Désélectionné)
+    ch422g_controller->setSDCardSelected(false); 
+    vTaskDelay(pdMS_TO_TICKS(50));
 
+    // 2. Générer des pulses d'horloge manuels (Dummy Clocks)
+    // On configure temporairement la pin SCK en GPIO pour "secouer" la carte
+    gpio_config_t sck_conf = {};
+    sck_conf.pin_bit_mask = (1ULL << SD_SCK_PIN);
+    sck_conf.mode = GPIO_MODE_OUTPUT;
+    ESP_ERROR_CHECK(gpio_config(&sck_conf));
+
+    for (int i = 0; i < 100; i++) {
+        gpio_set_level((gpio_num_t)SD_SCK_PIN, 0);
+        esp_rom_delay_us(10);
+        gpio_set_level((gpio_num_t)SD_SCK_PIN, 1);
+        esp_rom_delay_us(10);
+    }
+    ESP_LOGI(TAG, "Sent 100 dummy clocks.");
+
+    // 3. On remet la pin SCK pour le SPI
+    // (Le driver spi_bus_initialize s'en chargera, mais on libère la main)
+
+    // 4. Configuration SPI standard
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    // Use high speed SPI (20MHz+) as requested
-    host.max_freq_khz = 20000;
+    host.max_freq_khz = 400; // Très lent pour l'init
 
     spi_bus_config_t bus_cfg = {};
-    bus_cfg.mosi_io_num = SD_MOSI_PIN;
-    bus_cfg.miso_io_num = SD_MISO_PIN;
-    bus_cfg.sclk_io_num = SD_SCK_PIN;
+    bus_cfg.mosi_io_num = (gpio_num_t)SD_MOSI_PIN;
+    bus_cfg.miso_io_num = (gpio_num_t)SD_MISO_PIN;
+    bus_cfg.sclk_io_num = (gpio_num_t)SD_SCK_PIN;
     bus_cfg.quadwp_io_num = -1;
     bus_cfg.quadhd_io_num = -1;
-    bus_cfg.max_transfer_sz = 4000;
+
     esp_err_t ret = spi_bus_initialize((spi_host_device_t)host.slot, &bus_cfg, SPI_DMA_CH_AUTO);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize SPI bus.");
-        return ret;
-    }
+    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) return ret;
 
     sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
-    slot_config.gpio_cs = (gpio_num_t)-1; // Managed via CH422G
+    slot_config.gpio_cs = (gpio_num_t)-1;
     slot_config.host_id = (spi_host_device_t)host.slot;
 
-    // Reliability: Toggling SD_CS (High -> Delay -> Low) prior to mounting
-    ESP_LOGI(TAG, "Toggling SD_CS via CH422G...");
-    ESP_ERROR_CHECK(ch422g_controller->setSDCardSelected(false)); // High (Inactive)
-    vTaskDelay(pdMS_TO_TICKS(50));
-    ESP_ERROR_CHECK(ch422g_controller->setSDCardSelected(true)); // Low (Active)
-    vTaskDelay(pdMS_TO_TICKS(50));
+    // 5. ACTIVER LE CS juste avant l'appel (L'instant T)
+    ch422g_controller->setSDCardSelected(true);
+    vTaskDelay(pdMS_TO_TICKS(100)); // On laisse la tension se stabiliser
 
     ret = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_config, &mount_config, &card);
+    
+    // Si ça échoue, on relâche le CS
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to mount SD card VFS (%s)", esp_err_to_name(ret));
-        return ret;
+        ch422g_controller->setSDCardSelected(false);
     }
-
-    ESP_LOGI(TAG, "SD card mounted at /sdcard");
-    sdmmc_card_print_info(stdout, card);
-    return ESP_OK;
+    
+    return ret;
 }
 
 // LVGL Flush Callback

@@ -166,13 +166,18 @@ esp_err_t CH422GController::getDigitalOutput1(bool *active) {
 // --- Private Helpers ---
 
 esp_err_t CH422GController::writeEXIO(uint8_t val) {
+    uint8_t data = 0x01;
+    i2c_master_transmit(m_dev_config, &data, 1, -1);
     if (!m_dev_exio) return ESP_ERR_INVALID_STATE;
-    return i2c_master_transmit(m_dev_exio, &val, 1, 100);
+    return i2c_master_transmit(m_dev_exio, &val, 1, -1);
 }
 
 esp_err_t CH422GController::writeOC(uint8_t val) {
+    uint8_t data = 0x01;
+    esp_err_t ret = i2c_master_transmit(m_dev_config, &data, 1, -1);
+    if (ret != ESP_OK) return ret;
     if (!m_dev_oc) return ESP_ERR_INVALID_STATE;
-    return i2c_master_transmit(m_dev_oc, &val, 1, 100);
+    return i2c_master_transmit(m_dev_oc, &val, 1, -1);
 }
 
 esp_err_t CH422GController::readEXIO(uint8_t *val) {
