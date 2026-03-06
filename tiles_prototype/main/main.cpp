@@ -329,6 +329,42 @@ static void lvgl_touch_read_cb(lv_indev_t * indev, lv_indev_data_t * data) {
     data->state = LV_INDEV_STATE_RELEASED;
 }
 
+static void btn_event_cb(lv_event_t * e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if(code == LV_EVENT_CLICKED) {
+        ESP_LOGI(TAG, "Button clicked!");
+    }
+}
+
+void mytest() {
+    // Create a simple UI: "Hello World" with a button to test touch
+    lv_obj_t *label = lv_label_create(lv_screen_active());
+    lv_label_set_text(label, "Hello World from ESP32-S3!");
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_20, 0);
+    lv_obj_align(label, LV_ALIGN_CENTER, 0, -40);
+    lv_obj_set_style_text_color(label, lv_palette_main(LV_PALETTE_BLUE), 0);
+
+    lv_obj_t * btn = lv_button_create(lv_screen_active());
+    lv_obj_align(btn, LV_ALIGN_CENTER, 0, 40);
+    lv_obj_add_event_cb(btn, btn_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t * btn_label = lv_label_create(btn);
+    lv_label_set_text(btn_label, "Touch Me");
+    lv_obj_center(btn_label);
+
+    ESP_LOGI(TAG, "LVGL initialization complete. Entering main loop...");
+
+    // Periodic LVGL Task execution
+    while (1) {
+        xSemaphoreTakeRecursive(lvgl_mux, portMAX_DELAY);
+        uint32_t time_till_next = lv_timer_handler();
+        xSemaphoreGiveRecursive(lvgl_mux);
+
+        if (time_till_next < 1) {
+            time_till_next = 1;
+        }
+        vTaskDelay(pdMS_TO_TICKS(time_till_next));
+    }
+}
 
 void lvgl_init_task(void *arg) {
     ESP_LOGI(TAG, "Starting LVGL task...");
@@ -336,12 +372,16 @@ void lvgl_init_task(void *arg) {
     lv_tick_set_cb(lvgl_tick_cb);
 
     // Allocate draw buffers in internal SRAM for performance
-    uint32_t buffer_size = LCD_H_RES * 60;
+    uint32_t buffer_size = LCD_H_RES * 40;
     lv_color_t *buf1 = (lv_color_t *)heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     lv_color_t *buf2 = (lv_color_t *)heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
 
-    if (!buf1 || !buf2) {
-        ESP_LOGE(TAG, "Failed to allocate LVGL draw buffers in internal SRAM");
+    if (!buf1) {
+        ESP_LOGE(TAG, "Failed to allocate LVGL draw buffers in internal SRAM buf1");
+        abort();
+    }
+    if (!buf2) {
+        ESP_LOGE(TAG, "Failed to allocate LVGL draw buffers in internal SRAM buf2");
         abort();
     }
 
@@ -357,6 +397,8 @@ void lvgl_init_task(void *arg) {
         lv_indev_set_user_data(indev, tp_handle);
         lv_indev_set_read_cb(indev, lvgl_touch_read_cb);
     }
+
+    mytest();
 
     // Initialize Tile Engine
     static TileEngine engine;
