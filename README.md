@@ -45,6 +45,15 @@ While `updateTiles` logic finishes in ~280ms, the **visual display** of the tile
 **Long-term Idea:** Replace thousands of small files with a single large archive or binary blob (like MBTiles/SQLite).
 - **Benefit:** Significantly reduces FatFS overhead and eliminates the need for directory traversal.
 
+## 7. Multi-core Decoding (ESP32-S3 Dual Core)
+**Idea:** Offload JPEG/PNG decoding from the main UI core (Core 0) to Core 1.
+- **Implementation:** Currently, LVGL decoding is synchronous within `lv_timer_handler`. Using a custom decoder that pushes jobs to a Core 1 worker thread can significantly increase tile throughput without dropping UI frames.
+
+## 8. Tile Pre-fetching
+**Strategy:** Predict the user's movement and load tiles just outside the current 5x4 grid.
+- **Benefit:** When the user scrolls, tiles are already decoded and cached in PSRAM, leading to an instantaneous appearance.
+- **Challenge:** Requires management of a larger "invisible" tile grid and careful memory/cache eviction policies.
+
 ---
 
 *Status: Investigation document complete. Ready for implementation phase.*
