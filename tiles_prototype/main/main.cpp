@@ -280,7 +280,7 @@ esp_err_t init_sd_card(void) {
 
     // 4. Configuration SPI standard
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    host.max_freq_khz = 400; // Très lent pour l'init
+    host.max_freq_khz = 20000; // Fast for data transfer
 
     spi_bus_config_t bus_cfg = {};
     bus_cfg.mosi_io_num = (gpio_num_t)SD_MOSI_PIN;
@@ -424,8 +424,8 @@ void lvgl_init_task(void *arg) {
 
     if (true) {
         // Debug: Display a single tile to verify PNG decoding and rendering
-        // The user confirmed S:/tiles/3/1/1.png exists on their SD card.
-        engine.displaySingleTile("S:/tiles/3/1/1.png");
+        // The user confirmed S:/tiles/5/19/17.png exists on their SD card.
+        engine.displaySingleTile("S:/tiles/5/19/17.png");
     } else {
 #if TILE_DEBUG
         engine.debug(/*lat=*/0.0, /*lon=*/0.0, /*zoom=*/8);

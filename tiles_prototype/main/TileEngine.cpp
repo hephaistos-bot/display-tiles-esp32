@@ -278,9 +278,13 @@ void TileEngine::displaySingleTile(const char* path) {
     // 3. Create a plain Red rectangle as a sanity check for rendering
     lv_obj_t* rect = lv_obj_create(lv_screen_active());
     lv_obj_set_size(rect, 100, 100);
-    lv_obj_align(rect, LV_ALIGN_TOP_LEFT, 20, 20);
+    lv_obj_set_pos(rect, 20, 20); // Top-Left
     lv_obj_set_style_bg_color(rect, lv_palette_main(LV_PALETTE_RED), 0);
     lv_obj_set_style_bg_opa(rect, LV_OPA_COVER, 0);
+
+    lv_obj_t* label_tl = lv_label_create(rect);
+    lv_label_set_text(label_tl, "TOP-LEFT");
+    lv_obj_center(label_tl);
     ESP_LOGI(TAG, "Sanity Check: Created Red rectangle at (20,20)");
 
     // 4. Try to open file directly via LVGL FS to confirm access
@@ -308,14 +312,25 @@ void TileEngine::displaySingleTile(const char* path) {
     // 6. Create image object
     lv_obj_t* img = lv_image_create(lv_screen_active());
     lv_image_set_src(img, path);
+    lv_image_set_inner_align(img, LV_IMAGE_ALIGN_CENTER);
 
     // Position it in the center of the 800x480 screen
     lv_obj_center(img);
+
+    // If PNG decoding fails or is transparent, show a Yellow background
+    lv_obj_set_style_bg_color(img, lv_palette_main(LV_PALETTE_YELLOW), 0);
+    lv_obj_set_style_bg_opa(img, LV_OPA_COVER, 0);
 
     // Add a visible blue border to see the object boundaries
     lv_obj_set_style_border_color(img, lv_palette_main(LV_PALETTE_BLUE), 0);
     lv_obj_set_style_border_width(img, 5, 0);
     lv_obj_set_style_border_opa(img, LV_OPA_COVER, 0);
+
+    // Add a label to confirm position even if image fails
+    lv_obj_t* label_tile = lv_label_create(img);
+    lv_label_set_text(label_tile, "TILE");
+    lv_obj_set_style_text_color(label_tile, lv_palette_main(LV_PALETTE_BLACK), 0);
+    lv_obj_center(label_tile);
 
     // Add event callback for debugging rendering lifecycle
     lv_obj_add_event_cb(img, tile_event_cb, LV_EVENT_ALL, NULL);
