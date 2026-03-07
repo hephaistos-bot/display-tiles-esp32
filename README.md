@@ -4,6 +4,12 @@ This document outlines the planned and potential optimizations to improve the di
 
 Currently, `TileEngine::updateTiles` takes approximately **280ms** to refresh 20 tiles (5x4 grid). Our goal is to reduce this blocking time to ensure a smooth UI, especially for future scrolling and zooming.
 
+### Note on Visual Latency
+While `updateTiles` logic finishes in ~280ms, the **visual display** of the tiles takes significantly longer. This is because:
+1. **Logic vs. Rendering:** The 280ms only measures the CPU time to calculate positions and set the file paths in LVGL.
+2. **Asynchronous Decoding:** The actual image decoding (JPEG/PNG) and SD card data transfer happen *later* during the LVGL draw cycle (`lv_timer_handler`).
+3. **Sequential Processing:** LVGL decodes tiles sequentially. Decoding 20 high-resolution tiles on a single core at 240MHz is the main bottleneck for the final "on-screen" result.
+
 ## 1. Eliminate Synchronous I/O (`stat()` and `fopen`)
 **Issue:** The current implementation calls `stat()` for every tile on every update to check if the file exists before passing it to LVGL. LVGL then performs its own `fopen` and header reading. On a FatFS-over-SPI system, these metadata operations are expensive and synchronous.
 **Proposed Solution:**
