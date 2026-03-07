@@ -27,7 +27,21 @@ static const char* TAG = "TileEngine";
 
 #if TILE_FORMAT == RGB565_FORMAT
 #include "lvgl.h"
-#include "src/draw/lv_image_decoder.h"
+
+/**
+ * LVGL 9.5 image decoder descriptor structure.
+ * We define it here locally because internal headers are not always available in the include path.
+ */
+struct _lv_image_decoder_dsc_t {
+    lv_image_decoder_t * decoder;
+    const void * src;
+    lv_image_src_type_t src_type;
+    lv_image_header_t header;
+    lv_draw_buf_t * decoded;
+    const void * img_data;
+    uint32_t data_size;
+    void * user_data;
+};
 
 static lv_result_t decoder_info(lv_image_decoder_t * decoder, lv_image_decoder_dsc_t * dsc, lv_image_header_t * header) {
     (void) decoder;
