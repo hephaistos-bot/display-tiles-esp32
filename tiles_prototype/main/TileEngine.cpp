@@ -248,11 +248,9 @@ static void tile_event_cb(lv_event_t * e) {
         case LV_EVENT_DELETE: event_name = "DELETE"; break;
         case LV_EVENT_STYLE_CHANGED: event_name = "STYLE_CHANGED"; break;
         case LV_EVENT_REFR_EXT_DRAW_SIZE: event_name = "REFR_EXT_DRAW_SIZE"; break;
-        case LV_EVENT_INVALIDATE: event_name = "INVALIDATE"; break;
-        // Map common LVGL 9 codes seen in logs
-        case 27: event_name = "COORD_CHG"; break;
+        case LV_EVENT_INVALIDATE_AREA: event_name = "INVALIDATE_AREA"; break;
+        // Map common LVGL 9 codes seen in logs (careful not to duplicate macros)
         case 29: event_name = "GET_SELF_SIZE"; break;
-        case 30: event_name = "REFR_OBJ_SIZE"; break;
         case 31: event_name = "GET_BUFFER_SIZE"; break;
         case 32: event_name = "LAYOUT_CHANGED"; break;
         case 33: event_name = "GET_MAIN_OBJ_SIZE"; break;
