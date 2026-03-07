@@ -254,6 +254,7 @@ static void tile_event_cb(lv_event_t * e) {
         case 31: event_name = "GET_BUFFER_SIZE"; break;
         case 32: event_name = "LAYOUT_CHANGED"; break;
         case 33: event_name = "GET_MAIN_OBJ_SIZE"; break;
+        case 43: event_name = "HIT_TEST"; break;
         case 50: event_name = "CHILD_CHANGED"; break;
         case 53: event_name = "DRAW_TASK_ADDED"; break;
         default: break;
@@ -330,6 +331,26 @@ void TileEngine::displaySingleTile(const char* path) {
         ESP_LOGE(TAG, "Failed to get image info for %s - Decoder issue?", path);
     }
 
+    // 5b. Deep Decoder Probe
+    ESP_LOGI(TAG, "Probing all registered decoders...");
+    lv_image_decoder_t * d = lv_image_decoder_get_next(NULL);
+    int d_idx = 0;
+    while(d) {
+        ESP_LOGI(TAG, "  Decoder #%d: Info callback: %p, Open callback: %p",
+                 d_idx++, d->info_cb, d->open_cb);
+        d = lv_image_decoder_get_next(d);
+    }
+
+    // 5c. Manual Decode Test
+    lv_image_decoder_dsc_t decoder_dsc;
+    lv_result_t decode_res = lv_image_decoder_open(&decoder_dsc, path, NULL);
+    if(decode_res == LV_RESULT_OK) {
+        ESP_LOGI(TAG, "Manual Decode Success: Decoded image pointer: %p", decoder_dsc.decoded);
+        lv_image_decoder_close(&decoder_dsc);
+    } else {
+        ESP_LOGE(TAG, "Manual Decode FAILED (Result: %d)", decode_res);
+    }
+
     // 6. Create image object
     lv_obj_t* img = lv_image_create(lv_screen_active());
     lv_image_set_src(img, path);
@@ -355,6 +376,14 @@ void TileEngine::displaySingleTile(const char* path) {
 
     // Add event callback for debugging rendering lifecycle
     lv_obj_add_event_cb(img, tile_event_cb, LV_EVENT_ALL, NULL);
+
+    // 6b. Built-in symbol test (to verify image rendering is possible)
+    lv_obj_t* img_sym = lv_image_create(lv_screen_active());
+    lv_image_set_src(img_sym, LV_SYMBOL_IMAGE);
+    lv_obj_align(img_sym, LV_ALIGN_BOTTOM_LEFT, 20, -20);
+    lv_obj_set_style_text_font(img_sym, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(img_sym, lv_color_hex(0x00FF00), 0);
+    ESP_LOGI(TAG, "Symbol Test: Created image symbol at BOTTOM-LEFT");
 
     // 7. Force a full screen refresh
     lv_obj_invalidate(lv_screen_active());

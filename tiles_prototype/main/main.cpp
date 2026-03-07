@@ -426,6 +426,7 @@ void lvgl_init_task(void *arg) {
     if (true) {
         // Debug: Display a single tile to verify PNG decoding and rendering
         // The user confirmed S:/tiles/5/19/17.png exists on their SD card.
+        vTaskDelay(pdMS_TO_TICKS(500)); // Small delay to ensure FS and LVGL are stable
         engine.displaySingleTile("S:/tiles/5/19/17.png");
     } else {
 #if TILE_DEBUG
