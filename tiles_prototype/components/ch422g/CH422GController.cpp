@@ -63,13 +63,13 @@ esp_err_t CH422GController::init() {
 esp_err_t CH422GController::setLCDReset(bool active) {
     if (active) m_exio_cache &= ~BIT_EXIO_LCD_RST; 
     else        m_exio_cache |= BIT_EXIO_LCD_RST;  
-    return writeEXIO(m_exio_cache);
+    return writeOC(m_exio_cache);
 }
 
 esp_err_t CH422GController::setTouchReset(bool active) {
     if (active) m_exio_cache &= ~BIT_EXIO_TP_RST; 
     else        m_exio_cache |= BIT_EXIO_TP_RST;  
-    return writeEXIO(m_exio_cache);
+    return writeOC(m_exio_cache);
 }
 
 esp_err_t CH422GController::setBacklight(bool active) {
@@ -81,7 +81,7 @@ esp_err_t CH422GController::setBacklight(bool active) {
 esp_err_t CH422GController::setSDCardSelected(bool selected) {
     if (selected) m_exio_cache &= ~BIT_EXIO_SD_CS;  
     else          m_exio_cache |= BIT_EXIO_SD_CS;   
-    return writeEXIO(m_exio_cache);
+    return writeOC(m_exio_cache);
 }
 
 esp_err_t CH422GController::setDigitalOutput0(bool active) {
