@@ -424,7 +424,8 @@ void lvgl_init_task(void *arg) {
 
     if (true) {
         // Debug: Display a single tile to verify PNG decoding and rendering
-        engine.displaySingleTile("S:/tiles/8/144/145.png");
+        // The user confirmed S:/tiles/3/1/1.png exists on their SD card.
+        engine.displaySingleTile("S:/tiles/3/1/1.png");
     } else {
 #if TILE_DEBUG
         engine.debug(/*lat=*/0.0, /*lon=*/0.0, /*zoom=*/8);
