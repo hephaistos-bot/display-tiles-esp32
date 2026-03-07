@@ -106,6 +106,31 @@ void hardware_init(void) {
     ch422g_controller = new CH422GController(i2c_bus);
     ESP_ERROR_CHECK(ch422g_controller->init());
 
+ESP_LOGI(TAG, "Testing expander: Backlight ON");
+ch422g_controller->setBacklight(true);
+vTaskDelay(pdMS_TO_TICKS(5000));
+ESP_LOGI(TAG, "Testing expander: Backlight OF");
+ch422g_controller->setBacklight(false);
+vTaskDelay(pdMS_TO_TICKS(5000));
+ESP_LOGI(TAG, "Testing expander: Backlight ON");
+ch422g_controller->setBacklight(true);
+vTaskDelay(pdMS_TO_TICKS(5000));
+ESP_LOGI(TAG, "Testing expander: Backlight OFF");
+ch422g_controller->setBacklight(false);
+vTaskDelay(pdMS_TO_TICKS(5000));
+ESP_LOGI(TAG, "Testing expander: Backlight ON");
+ch422g_controller->setBacklight(true);
+vTaskDelay(pdMS_TO_TICKS(5000));
+ESP_LOGI(TAG, "Testing expander: Backlight OF");
+ch422g_controller->setBacklight(false);
+vTaskDelay(pdMS_TO_TICKS(5000));
+ESP_LOGI(TAG, "Testing expander: Backlight ON");
+ch422g_controller->setBacklight(true);
+vTaskDelay(pdMS_TO_TICKS(5000));
+ESP_LOGI(TAG, "Testing expander: Backlight OFF");
+ch422g_controller->setBacklight(false);
+vTaskDelay(pdMS_TO_TICKS(5000));
+
     // Set known safe state: Backlight ON, Resets Released, SD CS De-selected
     // (TP_RST=1, DISP=1, LCD_RST=1, SD_CS=1 -> 0x1E)
     ch422g_controller->setEXIOInitialState(0x1E);
