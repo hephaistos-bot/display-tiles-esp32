@@ -90,71 +90,6 @@ extern "C" void app_main(void) {
     xTaskCreate(lvgl_init_task, "LVGL", 1024 * 16, NULL, 5, NULL);
 }
 
-    i2c_master_dev_handle_t dev_handle_24; // Pour l'adresse 0x24
-    i2c_master_dev_handle_t dev_handle_38; // Pour l'adresse 0x38
-
-esp_err_t init_ch422g_backlight1() {
-    uint8_t data;
-
-    // Configure CH422G to output mode (Adresse 0x24)
-    data = 0x01;
-    ESP_ERROR_CHECK(i2c_master_transmit(dev_handle_24, &data, 1, -1));
-
-    // Pull the backlight pin high (Adresse 0x38)
-    data = 0x1E;
-    ESP_ERROR_CHECK(i2c_master_transmit(dev_handle_38, &data, 1, -1));
-
-    return ESP_OK;
-}
-esp_err_t init_ch422g_backlight0() {
-    uint8_t data;
-
-    // Configure CH422G to output mode (Adresse 0x24)
-    data = 0x01;
-    ESP_ERROR_CHECK(i2c_master_transmit(dev_handle_24, &data, 1, -1));
-
-    // Pull the backlight pin high (Adresse 0x38)
-    data = 0x1A;
-    ESP_ERROR_CHECK(i2c_master_transmit(dev_handle_38, &data, 1, -1));
-
-    return ESP_OK;
-}
-
-void test() {
-    
-    // Ajout des "devices" (le CH422G utilise plusieurs adresses pour ses fonctions)
-    i2c_device_config_t dev_cfg_24 = {};
-    dev_cfg_24.dev_addr_length = I2C_ADDR_BIT_LEN_7;
-    dev_cfg_24.device_address = 0x24;
-    dev_cfg_24.scl_speed_hz = 400000;
-
-    i2c_device_config_t dev_cfg_38 = {};
-    dev_cfg_38.dev_addr_length = I2C_ADDR_BIT_LEN_7;
-    dev_cfg_38.device_address = 0x38;
-    dev_cfg_38.scl_speed_hz = 400000;
-    
-    ESP_ERROR_CHECK(i2c_master_bus_add_device(i2c_bus, &dev_cfg_24, &dev_handle_24));
-    ESP_ERROR_CHECK(i2c_master_bus_add_device(i2c_bus, &dev_cfg_38, &dev_handle_38));
- ESP_LOGI(TAG, "Testing expander: Backlight OFF");
-    init_ch422g_backlight1();
-vTaskDelay(pdMS_TO_TICKS(5000));
-ESP_LOGI(TAG, "Testing expander: Backlight ON");
-    init_ch422g_backlight0();
-vTaskDelay(pdMS_TO_TICKS(5000));
- ESP_LOGI(TAG, "Testing expander: Backlight OFF");
-    init_ch422g_backlight1();
-vTaskDelay(pdMS_TO_TICKS(5000));
-ESP_LOGI(TAG, "Testing expander: Backlight ON");
-    init_ch422g_backlight0();
-vTaskDelay(pdMS_TO_TICKS(5000));
- ESP_LOGI(TAG, "Testing expander: Backlight OFF");
-    init_ch422g_backlight1();
-vTaskDelay(pdMS_TO_TICKS(5000));
-ESP_LOGI(TAG, "Testing expander: Backlight ON");
-    init_ch422g_backlight0();
-vTaskDelay(pdMS_TO_TICKS(5000));
-}
-
 void hardware_init(void) {
     // Hardware needs time to settle after power-up
     ESP_LOGI(TAG, "Hardware stabilization (1.5s)...");
@@ -175,30 +110,6 @@ void hardware_init(void) {
     ESP_LOGI(TAG, "Initializing CH422G...");
     ch422g_controller = new CH422GController(i2c_bus);
     ESP_ERROR_CHECK(ch422g_controller->init());
-
-ESP_LOGI(TAG, "Testing expander: Backlight ON");
-ch422g_controller->setBacklight(true);
-vTaskDelay(pdMS_TO_TICKS(5000));
-ESP_LOGI(TAG, "Testing expander: Backlight OF");
-ch422g_controller->setBacklight(false);
-vTaskDelay(pdMS_TO_TICKS(5000));
-ESP_LOGI(TAG, "Testing expander: Backlight ON");
-ch422g_controller->setBacklight(true);
-vTaskDelay(pdMS_TO_TICKS(5000));
-ESP_LOGI(TAG, "Testing expander: Backlight OFF");
-ch422g_controller->setBacklight(false);
-vTaskDelay(pdMS_TO_TICKS(5000));
-ESP_LOGI(TAG, "Testing expander: Backlight ON");
-ch422g_controller->setBacklight(true);
-vTaskDelay(pdMS_TO_TICKS(5000));
-ESP_LOGI(TAG, "Testing expander: Backlight OF");
-ch422g_controller->setBacklight(false);
-vTaskDelay(pdMS_TO_TICKS(5000));
-ESP_LOGI(TAG, "Testing expander: Backlight ON");
-ch422g_controller->setBacklight(true);
-vTaskDelay(pdMS_TO_TICKS(5000));
-ESP_LOGI(TAG, "Testing expander: Backlight OFF");
-ch422g_controller->setBacklight(false);
 
     // Set known safe state: Backlight ON, Resets Released, SD CS De-selected
     // (TP_RST=1, DISP=1, LCD_RST=1, SD_CS=1 -> 0x1E)
@@ -507,17 +418,15 @@ void lvgl_init_task(void *arg) {
         lv_indev_set_read_cb(indev, lvgl_touch_read_cb);
     }
 
-    mytest();
-
     // Initialize Tile Engine
     static TileEngine engine;
     engine.init();
 
 #if TILE_DEBUG
-    engine.debug(0.0, 0.0, 5);
+    engine.debug(0.0, 0.0, 6);
 #endif
 
-    engine.setMapCenter(0.0, 0.0, 5); // Test Case: Equator
+    engine.setMapCenter(0.0, 0.0, 6); // Test Case: Equator
 
     ESP_LOGI(TAG, "LVGL initialization complete. Entering main loop...");
 

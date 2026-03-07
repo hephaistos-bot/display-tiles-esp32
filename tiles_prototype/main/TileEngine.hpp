@@ -30,7 +30,7 @@ private:
     static constexpr int GRID_ROWS = 4;
     static constexpr int SCREEN_WIDTH = 800;
     static constexpr int SCREEN_HEIGHT = 480;
-    static constexpr const char* TILE_PATH_BASE = "/sdcard/tiles";
+    static constexpr const char* TILE_PATH_BASE = "/tiles";
     static constexpr const char* LV_DRIVE_PREFIX = "S:";
 
     lv_obj_t* _map_container;
