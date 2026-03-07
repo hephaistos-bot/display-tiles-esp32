@@ -239,14 +239,21 @@ void TileEngine::debug(double lat, double lon, int zoom) {
                         signature_ok = true;
                         total_valid++;
                     }
+#elif TILE_FORMAT == RGB565_FORMAT
+                    // Signature JPEG : 19 12 0
+                    if (header[0] == 0x19 && header[1] == 0x12 && header[2] == 0x00) {
+                    // && header[3] == 0x00 && header[4] == 0x00 && header[5] == 0x01 && header[6] == 0x00 && header[7] == 0x01) {
+                        signature_ok = true;
+                        total_valid++;
+                    }
 #else
                     total_valid++;
 #endif
                 }
                 // --- Fermeture ---
                 lv_fs_close(&f);
-                ESP_LOGI(TAG, "Tile [%d,%d] - FOUND - LVGL Path: %s, Size: %u bytes, PNG Header: %s",
-                         tile_idx_x, tile_idx_y, full_path, (unsigned int)size, signature_ok ? "OK" : "INVALID");
+                ESP_LOGI(TAG, "Tile [%d,%d] - FOUND - LVGL Path: %s, Size: %u bytes, %s Header: %s",
+                         tile_idx_x, tile_idx_y, full_path, (unsigned int)size, TILE_EXTENTION, signature_ok ? "OK" : "INVALID");
             } else {
                 ESP_LOGE(TAG, "Tile [%d,%d] - MISSING - LVGL Path: %s (Error: %d)", 
                          tile_idx_x, tile_idx_y, full_path, res);
@@ -254,11 +261,11 @@ void TileEngine::debug(double lat, double lon, int zoom) {
         }
     }
     if (total_valid == GRID_ROWS * GRID_COLS) {
-        ESP_LOGI(TAG, "Summary: %d/%d tiles found, %d/%d tiles have valid PNG signature.",
-                 total_found, GRID_ROWS * GRID_COLS, total_valid, total_found);
+        ESP_LOGI(TAG, "Summary: %d/%d tiles found, %d/%d tiles have valid %s signature.",
+                 total_found, GRID_ROWS * GRID_COLS, total_valid, total_found, TILE_EXTENTION);
     } else {
-        ESP_LOGE(TAG, "Summary: %d/%d tiles found, %d/%d tiles have valid PNG signature.",
-                 total_found, GRID_ROWS * GRID_COLS, total_valid, total_found);
+        ESP_LOGE(TAG, "Summary: %d/%d tiles found, %d/%d tiles have valid %s signature.",
+                 total_found, GRID_ROWS * GRID_COLS, total_valid, total_found, TILE_EXTENTION);
     }
     ESP_LOGI(TAG, "--- Tile Engine Debug End ---");
 }
