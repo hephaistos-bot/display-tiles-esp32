@@ -35,9 +35,9 @@ static const char* TAG = "TileEngine";
 struct _lv_image_decoder_dsc_t {
     lv_image_decoder_t * decoder;
     const void * src;
-    lv_image_src_type_t src_type;
+    lv_image_src_t src_type;
     lv_image_header_t header;
-    lv_draw_buf_t * decoded;
+    void * decoded;
     const void * img_data;
     uint32_t data_size;
     void * user_data;
