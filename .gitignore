@@ -56,3 +56,4 @@ venv.bak/
 # General
 *.swp
 *~
+tiles_prototype/monitor.log
