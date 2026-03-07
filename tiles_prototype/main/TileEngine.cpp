@@ -236,3 +236,156 @@ void TileEngine::debug(double lat, double lon, int zoom) {
     ESP_LOGI(TAG, "--- Tile Engine Debug End ---");
 }
 #endif
+
+static void tile_event_cb(lv_event_t * e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    const char* event_name = "UNKNOWN";
+
+    switch(code) {
+        case LV_EVENT_DRAW_MAIN_BEGIN: event_name = "DRAW_MAIN_BEGIN"; break;
+        case LV_EVENT_DRAW_MAIN_END: event_name = "DRAW_MAIN_END"; break;
+        case LV_EVENT_READY: event_name = "READY (SUCCESS)"; break;
+        case LV_EVENT_DELETE: event_name = "DELETE"; break;
+        case LV_EVENT_STYLE_CHANGED: event_name = "STYLE_CHANGED"; break;
+        case LV_EVENT_REFR_EXT_DRAW_SIZE: event_name = "REFR_EXT_DRAW_SIZE"; break;
+        case LV_EVENT_INVALIDATE_AREA: event_name = "INVALIDATE_AREA"; break;
+        // Map common LVGL 9 codes seen in logs (careful not to duplicate macros)
+        case 29: event_name = "GET_SELF_SIZE"; break;
+        case 31: event_name = "GET_BUFFER_SIZE"; break;
+        case 32: event_name = "LAYOUT_CHANGED"; break;
+        case 33: event_name = "GET_MAIN_OBJ_SIZE"; break;
+        case 43: event_name = "HIT_TEST"; break;
+        case 50: event_name = "CHILD_CHANGED"; break;
+        case 53: event_name = "DRAW_TASK_ADDED"; break;
+        default: break;
+    }
+
+    ESP_LOGI("TileEngine", "Single Tile Event: %s (%d)", event_name, code);
+}
+
+void TileEngine::displaySingleTile(const char* path) {
+    ESP_LOGI(TAG, "Displaying single tile debug: %s", path);
+
+#ifdef LV_USE_LODEPNG
+    ESP_LOGI(TAG, "Compile-time check: LV_USE_LODEPNG is DEFINED (Value: %d)", LV_USE_LODEPNG);
+#else
+    ESP_LOGE(TAG, "Compile-time check: LV_USE_LODEPNG is NOT DEFINED! PNG decoding will fail.");
+#endif
+
+    // 1. Cleanup existing engine state to isolate test
+    if (_map_container) {
+        lv_obj_delete(_map_container);
+        _map_container = nullptr;
+    }
+
+    // 2. Set screen background to dark grey to confirm display is alive
+    lv_obj_set_style_bg_color(lv_screen_active(), lv_palette_main(LV_PALETTE_GREY), 0);
+    lv_obj_set_style_bg_opa(lv_screen_active(), LV_OPA_COVER, 0);
+
+    // 3. Create a plain Red rectangle as a sanity check for rendering
+    lv_obj_t* rect = lv_obj_create(lv_screen_active());
+    lv_obj_set_size(rect, 100, 100);
+    lv_obj_set_pos(rect, 20, 20); // Top-Left
+    lv_obj_set_style_bg_color(rect, lv_palette_main(LV_PALETTE_RED), 0);
+    lv_obj_set_style_bg_opa(rect, LV_OPA_COVER, 0);
+
+    lv_obj_t* label_tl = lv_label_create(rect);
+    lv_label_set_text(label_tl, "TOP-LEFT");
+    lv_obj_center(label_tl);
+    ESP_LOGI(TAG, "Sanity Check: Created Red rectangle at (20,20)");
+
+    // 4. Try to open file directly via LVGL FS to confirm access
+    // First use stat() as a sanity check to avoid crashes on some FatFS ports
+    char std_path[128];
+    if (path[0] == 'S' && path[1] == ':') {
+        snprintf(std_path, sizeof(std_path), "/sdcard%s", path + 2);
+    } else {
+        snprintf(std_path, sizeof(std_path), "%s", path);
+    }
+
+    struct stat st;
+    if (stat(std_path, &st) != 0) {
+        ESP_LOGE(TAG, "Standard FS Check: FAILED - %s not found on SD card.", std_path);
+        return;
+    }
+    ESP_LOGI(TAG, "Standard FS Check: SUCCESS - %s exists, size %ld", std_path, st.st_size);
+
+    lv_fs_file_t f;
+    lv_fs_res_t fs_res = lv_fs_open(&f, path, LV_FS_MODE_RD);
+    if (fs_res == LV_FS_RES_OK) {
+        uint32_t size = 0;
+        lv_fs_seek(&f, 0, LV_FS_SEEK_END);
+        lv_fs_tell(&f, &size);
+        lv_fs_close(&f);
+        ESP_LOGI(TAG, "LVGL FS Check: Success - %s is readable, size %u bytes", path, (unsigned int)size);
+    } else {
+        ESP_LOGE(TAG, "LVGL FS Check: Failed to open %s (Error: %d)", path, fs_res);
+    }
+
+    // 5. Try to get image info via decoder
+    lv_image_header_t header;
+    lv_result_t res = lv_image_decoder_get_info(path, &header);
+    if (res == LV_RESULT_OK) {
+        ESP_LOGI(TAG, "Image Decoder Info: %dx%d, Format: %d", header.w, header.h, header.cf);
+    } else {
+        ESP_LOGE(TAG, "Failed to get image info for %s - Decoder issue?", path);
+    }
+
+    // 5b. Deep Decoder Probe
+    ESP_LOGI(TAG, "Probing all registered decoders...");
+    lv_image_decoder_t * d = lv_image_decoder_get_next(NULL);
+    int d_idx = 0;
+    while(d) {
+        ESP_LOGI(TAG, "  Decoder #%d: Info callback: %p, Open callback: %p",
+                 d_idx++, d->info_cb, d->open_cb);
+        d = lv_image_decoder_get_next(d);
+    }
+
+    // 5c. Manual Decode Test
+    lv_image_decoder_dsc_t decoder_dsc;
+    lv_result_t decode_res = lv_image_decoder_open(&decoder_dsc, path, NULL);
+    if(decode_res == LV_RESULT_OK) {
+        ESP_LOGI(TAG, "Manual Decode Success: Decoded image pointer: %p", decoder_dsc.decoded);
+        lv_image_decoder_close(&decoder_dsc);
+    } else {
+        ESP_LOGE(TAG, "Manual Decode FAILED (Result: %d)", decode_res);
+    }
+
+    // 6. Create image object
+    lv_obj_t* img = lv_image_create(lv_screen_active());
+    lv_image_set_src(img, path);
+    lv_image_set_inner_align(img, LV_IMAGE_ALIGN_CENTER);
+
+    // Position it in the center of the 800x480 screen
+    lv_obj_center(img);
+
+    // If PNG decoding fails or is transparent, show a Yellow background
+    lv_obj_set_style_bg_color(img, lv_palette_main(LV_PALETTE_YELLOW), 0);
+    lv_obj_set_style_bg_opa(img, LV_OPA_COVER, 0);
+
+    // Add a visible blue border to see the object boundaries
+    lv_obj_set_style_border_color(img, lv_palette_main(LV_PALETTE_BLUE), 0);
+    lv_obj_set_style_border_width(img, 5, 0);
+    lv_obj_set_style_border_opa(img, LV_OPA_COVER, 0);
+
+    // Add a label to confirm position even if image fails
+    lv_obj_t* label_tile = lv_label_create(img);
+    lv_label_set_text(label_tile, "TILE");
+    lv_obj_set_style_text_color(label_tile, lv_color_black(), 0);
+    lv_obj_center(label_tile);
+
+    // Add event callback for debugging rendering lifecycle
+    lv_obj_add_event_cb(img, tile_event_cb, LV_EVENT_ALL, NULL);
+
+    // 6b. Built-in symbol test (to verify image rendering is possible)
+    lv_obj_t* img_sym = lv_image_create(lv_screen_active());
+    lv_image_set_src(img_sym, LV_SYMBOL_IMAGE);
+    lv_obj_align(img_sym, LV_ALIGN_BOTTOM_LEFT, 20, -20);
+    lv_obj_set_style_text_font(img_sym, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(img_sym, lv_color_hex(0x00FF00), 0);
+    ESP_LOGI(TAG, "Symbol Test: Created image symbol at BOTTOM-LEFT");
+
+    // 7. Force a full screen refresh
+    lv_obj_invalidate(lv_screen_active());
+    ESP_LOGI(TAG, "Requested full screen invalidation.");
+}

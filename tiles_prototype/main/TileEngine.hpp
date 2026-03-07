@@ -15,6 +15,7 @@ public:
     void init();
     void setMapCenter(double lat, double lon, int zoom);
     void debug(double lat, double lon, int zoom);
+    void displaySingleTile(const char* path);
 
 private:
     struct TileInfo {

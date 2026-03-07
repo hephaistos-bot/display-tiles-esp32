@@ -87,7 +87,8 @@ extern "C" void app_main(void) {
 
     // 2. Setup LVGL Synchronization and Task
     lvgl_mux = xSemaphoreCreateRecursiveMutex();
-    xTaskCreate(lvgl_init_task, "LVGL", 1024 * 16, NULL, 5, NULL);
+    // Increase stack size to 64KB for LodePNG and FatFS operations
+    xTaskCreate(lvgl_init_task, "LVGL", 1024 * 64, NULL, 5, NULL);
 }
 
 void hardware_init(void) {
@@ -280,7 +281,7 @@ esp_err_t init_sd_card(void) {
 
     // 4. Configuration SPI standard
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    host.max_freq_khz = 400; // Très lent pour l'init
+    host.max_freq_khz = 20000; // Fast for data transfer
 
     spi_bus_config_t bus_cfg = {};
     bus_cfg.mosi_io_num = (gpio_num_t)SD_MOSI_PIN;
@@ -391,17 +392,17 @@ void lvgl_init_task(void *arg) {
     lv_init();
     lv_tick_set_cb(lvgl_tick_cb);
 
-    // Allocate draw buffers in internal SRAM for performance
+    // Allocate draw buffers in PSRAM (Internal SRAM is too small for 800x40 double buffers + 64KB stack)
     uint32_t buffer_size = LCD_H_RES * 40;
-    lv_color_t *buf1 = (lv_color_t *)heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    lv_color_t *buf2 = (lv_color_t *)heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    lv_color_t *buf1 = (lv_color_t *)heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    lv_color_t *buf2 = (lv_color_t *)heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 
     if (!buf1) {
-        ESP_LOGE(TAG, "Failed to allocate LVGL draw buffers in internal SRAM buf1");
+        ESP_LOGE(TAG, "Failed to allocate LVGL draw buffers in PSRAM buf1");
         abort();
     }
     if (!buf2) {
-        ESP_LOGE(TAG, "Failed to allocate LVGL draw buffers in internal SRAM buf2");
+        ESP_LOGE(TAG, "Failed to allocate LVGL draw buffers in PSRAM buf2");
         abort();
     }
 
@@ -422,11 +423,17 @@ void lvgl_init_task(void *arg) {
     static TileEngine engine;
     engine.init();
 
+    if (true) {
+        // Debug: Display a single tile to verify PNG decoding and rendering
+        // The user confirmed S:/tiles/5/19/17.png exists on their SD card.
+        vTaskDelay(pdMS_TO_TICKS(500)); // Small delay to ensure FS and LVGL are stable
+        engine.displaySingleTile("S:/tiles/5/19/17.png");
+    } else {
 #if TILE_DEBUG
-    engine.debug(/*lat=*/0.0, /*lon=*/0.0, /*zoom=*/8);
+        engine.debug(/*lat=*/0.0, /*lon=*/0.0, /*zoom=*/8);
 #endif
-
-    engine.setMapCenter(/*lat=*/0.0, /*lon=*/0.0, /*zoom=*/8); // Test Case: Equator
+        engine.setMapCenter(/*lat=*/0.0, /*lon=*/0.0, /*zoom=*/8); // Test Case: Equator
+    }
 
     ESP_LOGI(TAG, "LVGL initialization complete. Entering main loop...");
 
