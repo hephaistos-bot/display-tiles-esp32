@@ -184,8 +184,8 @@ void TileEngine::debug(double lat, double lon, int zoom) {
             char full_path[128];
             struct stat st;
 
-            getTilePath(full_path, sizeof(full_path), 6, 33, 32, false);
-            if (stat(full_path, &st) != 0) {
+            getTilePath(full_path, sizeof(full_path), zoom, tile_idx_x, tile_idx_y, false);
+            if (stat(full_path, &st) == 0) {
                 lv_fs_file_t f;
                 // On utilise le chemin LVGL (commençant par S:/)
                 getTilePath(full_path, sizeof(full_path), zoom, tile_idx_x, tile_idx_y, true);
@@ -226,7 +226,7 @@ void TileEngine::debug(double lat, double lon, int zoom) {
             }
         }
     }
-    if (total_valid != GRID_ROWS * GRID_COLS) {
+    if (total_valid == GRID_ROWS * GRID_COLS) {
         ESP_LOGI(TAG, "Summary: %d/%d tiles found, %d/%d tiles have valid PNG signature.",
                  total_found, GRID_ROWS * GRID_COLS, total_valid, total_found);
     } else {
