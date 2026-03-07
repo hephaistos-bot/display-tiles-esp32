@@ -299,7 +299,7 @@ void TileEngine::displaySingleTile(const char* path) {
     if (path[0] == 'S' && path[1] == ':') {
         snprintf(std_path, sizeof(std_path), "/sdcard%s", path + 2);
     } else {
-        strncpy(std_path, path, sizeof(std_path));
+        snprintf(std_path, sizeof(std_path), "%s", path);
     }
 
     struct stat st;
