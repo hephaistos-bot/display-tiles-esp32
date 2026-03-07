@@ -8,13 +8,17 @@
 
 #include <sys/stat.h>
 
-#define JPEG_FORMAT 1
-#define PNG_FORMAT 2
-#define TILE_FORMAT JPEG_FORMAT
+#define JPEG_FORMAT   1
+#define PNG_FORMAT    2
+#define RGB565_FORMAT 3
+#define TILE_FORMAT RGB565_FORMAT
+
 #if TILE_FORMAT == JPEG_FORMAT
 #define TILE_EXTENTION "jpg"
 #elif TILE_FORMAT == PNG_FORMAT
 #define TILE_EXTENTION "png"
+#elif TILE_FORMAT == RGB565_FORMAT
+#define TILE_EXTENTION "rgb565"
 #endif
 
 static const char* TAG = "TileEngine";
@@ -235,6 +239,8 @@ void TileEngine::debug(double lat, double lon, int zoom) {
                         signature_ok = true;
                         total_valid++;
                     }
+#else
+                    total_valid++;
 #endif
                 }
                 // --- Fermeture ---
