@@ -422,11 +422,16 @@ void lvgl_init_task(void *arg) {
     static TileEngine engine;
     engine.init();
 
+    // Debug: Display a single tile to verify PNG decoding and rendering
+    engine.displaySingleTile("S:/tiles/8/144/145.png");
+
+/*
 #if TILE_DEBUG
-    engine.debug(/*lat=*/0.0, /*lon=*/0.0, /*zoom=*/8);
+    engine.debug(/*lat=* /0.0, /*lon=* /0.0, /*zoom=* /8);
 #endif
 
-    engine.setMapCenter(/*lat=*/0.0, /*lon=*/0.0, /*zoom=*/8); // Test Case: Equator
+    engine.setMapCenter(/*lat=* /0.0, /*lon=* /0.0, /*zoom=* /8); // Test Case: Equator
+*/
 
     ESP_LOGI(TAG, "LVGL initialization complete. Entering main loop...");
 

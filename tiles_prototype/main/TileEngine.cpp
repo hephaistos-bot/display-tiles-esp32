@@ -236,3 +236,36 @@ void TileEngine::debug(double lat, double lon, int zoom) {
     ESP_LOGI(TAG, "--- Tile Engine Debug End ---");
 }
 #endif
+
+static void tile_event_cb(lv_event_t * e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if(code == LV_EVENT_DRAW_MAIN_BEGIN) {
+        ESP_LOGI("TileEngine", "Single Tile: Draw Main Begin");
+    } else if(code == LV_EVENT_READY) {
+        ESP_LOGI("TileEngine", "Single Tile: Ready (Image Loaded)");
+    } else if(code == LV_EVENT_ERROR) {
+        ESP_LOGE("TileEngine", "Single Tile: Draw Error!");
+    }
+}
+
+void TileEngine::displaySingleTile(const char* path) {
+    ESP_LOGI(TAG, "Displaying single tile: %s", path);
+
+    // Set screen background to dark grey to differentiate from default white
+    lv_obj_set_style_bg_color(lv_screen_active(), lv_palette_main(LV_PALETTE_GREY), 0);
+    lv_obj_set_style_bg_opa(lv_screen_active(), LV_OPA_COVER, 0);
+
+    lv_obj_t* img = lv_image_create(lv_screen_active());
+    lv_image_set_src(img, path);
+
+    // Position it in the center of the 800x480 screen
+    lv_obj_center(img);
+
+    // Add a visible red border to see the object boundaries
+    lv_obj_set_style_border_color(img, lv_palette_main(LV_PALETTE_RED), 0);
+    lv_obj_set_style_border_width(img, 5, 0);
+    lv_obj_set_style_border_opa(img, LV_OPA_COVER, 0);
+
+    // Add event callback for debugging rendering lifecycle
+    lv_obj_add_event_cb(img, tile_event_cb, LV_EVENT_ALL, NULL);
+}
