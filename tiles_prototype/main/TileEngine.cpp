@@ -8,8 +8,6 @@
 
 #include <sys/stat.h>
 
-namespace {
-
 static const char* TAG = "TileEngine";
 
 void list_sd_card_contents(const char *main_dir) {
@@ -45,8 +43,6 @@ void list_sd_card_contents(const char *main_dir) {
 
     // 4. Fermer le répertoire
     lv_fs_dir_close(&dir);
-}
-
 }
 
 TileEngine::TileEngine() : _map_container(nullptr) {}
@@ -132,8 +128,12 @@ void TileEngine::updateTiles(double lat, double lon, int zoom) {
                 tile.zoom = zoom;
 
                 // Important: Each tile must have its own persistent path string buffer
-                getTilePath(tile.path, sizeof(tile.path), zoom, tile_idx_x, tile_idx_y, true);
-                lv_image_set_src(tile.img_obj, tile.path);
+                struct stat st;
+                getTilePath(tile.path, sizeof(tile.path), zoom, tile_idx_x, tile_idx_y, false);
+                if (stat(tile.path, &st) == 0) {
+                    getTilePath(tile.path, sizeof(tile.path), zoom, tile_idx_x, tile_idx_y, true);
+                    lv_image_set_src(tile.img_obj, tile.path);
+                }
             }
         }
     }
@@ -157,7 +157,7 @@ void TileEngine::debug(double lat, double lon, int zoom) {
         ESP_LOGE(TAG, "LVGL FS CHECK: FAILED - Drive '%s' is NOT usable (Error: %d). Check LVGL FatFS config.", root_path, res);
     }
 //    ESP_LOGI(TAG, "Lecture du contenu de S:");
-    list_sd_card_contents("S:");
+//    list_sd_card_contents("S:");
 
     double tile_x, tile_y;
     latLonToTile(lat, lon, zoom, tile_x, tile_y);
