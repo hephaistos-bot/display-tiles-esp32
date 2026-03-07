@@ -283,7 +283,7 @@ esp_err_t init_sd_card(void) {
 
     // 4. Configuration SPI standard
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    host.max_freq_khz = 20000;
+    host.max_freq_khz = 40000;
 
     spi_bus_config_t bus_cfg = {};
     bus_cfg.mosi_io_num = (gpio_num_t)SD_MOSI_PIN;

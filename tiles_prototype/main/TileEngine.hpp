@@ -29,7 +29,7 @@ private:
 
     static constexpr int TILE_SIZE = 256;
     static constexpr int GRID_COLS = 5;
-    static constexpr int GRID_ROWS = 4;
+    static constexpr int GRID_ROWS = 3;
     static constexpr int SCREEN_WIDTH = 800;
     static constexpr int SCREEN_HEIGHT = 480;
     static constexpr const char* TILE_PATH_BASE = "/tiles";
