@@ -8,6 +8,15 @@
 
 #include <sys/stat.h>
 
+#define JPEG_FORMAT 1
+#define PNG_FORMAT 2
+#define TILE_FORMAT JPEG_FORMAT
+#if TILE_FORMAT == JPEG_FORMAT
+#define TILE_EXTENTION "jpg"
+#elif TILE_FORMAT == PNG_FORMAT
+#define TILE_EXTENTION "png"
+#endif
+
 static const char* TAG = "TileEngine";
 
 void list_sd_card_contents(const char *main_dir) {
@@ -78,9 +87,9 @@ void TileEngine::latLonToTile(double lat, double lon, int zoom, double& x, doubl
 
 void TileEngine::getTilePath(char* buf, size_t buf_size, int zoom, int x, int y, bool for_lvgl) {
     if (for_lvgl) {
-        snprintf(buf, buf_size, "%s%s/%d/%d/%d.png", LV_DRIVE_PREFIX, TILE_PATH_BASE, zoom, x, y);
+        snprintf(buf, buf_size, "%s%s/%d/%d/%d." TILE_EXTENTION, LV_DRIVE_PREFIX, TILE_PATH_BASE, zoom, x, y);
     } else {
-        snprintf(buf, buf_size, "/sdcard%s/%d/%d/%d.png", TILE_PATH_BASE, zoom, x, y);
+        snprintf(buf, buf_size, "/sdcard%s/%d/%d/%d." TILE_EXTENTION, TILE_PATH_BASE, zoom, x, y);
     }
 }
 
@@ -191,30 +200,33 @@ void TileEngine::debug(double lat, double lon, int zoom) {
                 getTilePath(full_path, sizeof(full_path), zoom, tile_idx_x, tile_idx_y, true);
                 lv_fs_res_t res = lv_fs_open(&f, full_path, LV_FS_MODE_RD);
                 total_found++;
-
                 // --- Équivalent de fseek(f, 0, SEEK_END) + ftell(f) ---
                 uint32_t size = 0;
                 lv_fs_seek(&f, 0, LV_FS_SEEK_END);
                 lv_fs_tell(&f, &size);
-
                 // On revient au début : fseek(f, 0, SEEK_SET)
                 lv_fs_seek(&f, 0, LV_FS_SEEK_SET);
-
                 // --- Lecture du Header ---
                 uint8_t header[8];
                 uint32_t br; // Bytes Read (indispensable avec LVGL)
                 bool signature_ok = false;
-
                 // lv_fs_read prend l'adresse de br pour retourner le nombre d'octets lus
                 res = lv_fs_read(&f, header, 8, &br);
-
                 if (res == LV_FS_RES_OK && br == 8) {
+#if TILE_FORMAT == PNG_FORMAT
                     // PNG Signature: 89 50 4E 47 0D 0A 1A 0A
                     if (header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47 &&
                         header[4] == 0x0D && header[5] == 0x0A && header[6] == 0x1A && header[7] == 0x0A) {
                         signature_ok = true;
                         total_valid++;
                     }
+#elif TILE_FORMAT == JPEG_FORMAT
+                    // Signature JPEG : FF D8 FF
+                    if (header[0] == 0xFF && header[1] == 0xD8 && header[2] == 0xFF) {
+                        signature_ok = true;
+                        total_valid++;
+                    }
+#endif
                 }
                 // --- Fermeture ---
                 lv_fs_close(&f);

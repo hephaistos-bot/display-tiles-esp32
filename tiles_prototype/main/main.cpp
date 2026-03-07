@@ -280,7 +280,7 @@ esp_err_t init_sd_card(void) {
 
     // 4. Configuration SPI standard
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    host.max_freq_khz = 400; // Très lent pour l'init
+    host.max_freq_khz = 20000;
 
     spi_bus_config_t bus_cfg = {};
     bus_cfg.mosi_io_num = (gpio_num_t)SD_MOSI_PIN;
@@ -423,10 +423,10 @@ void lvgl_init_task(void *arg) {
     engine.init();
 
 #if TILE_DEBUG
-    engine.debug(/*lat=*/0.0, /*lon=*/0.0, /*zoom=*/8);
+    engine.debug(/*lat=*/-25.0, /*lon=*/25.0, /*zoom=*/8);
 #endif
 
-    engine.setMapCenter(/*lat=*/0.0, /*lon=*/0.0, /*zoom=*/8); // Test Case: Equator
+    engine.setMapCenter(/*lat=*/-25.0, /*lon=*/25.0, /*zoom=*/8);
 
     ESP_LOGI(TAG, "LVGL initialization complete. Entering main loop...");
 
