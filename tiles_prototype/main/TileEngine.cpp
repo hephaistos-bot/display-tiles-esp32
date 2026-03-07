@@ -5,6 +5,7 @@
 #include <dirent.h>
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
 
 #include <sys/stat.h>
 
@@ -24,12 +25,12 @@
 static const char* TAG = "TileEngine";
 
 #if TILE_FORMAT == RGB565_FORMAT
-static lv_result_t decoder_info(lv_image_decoder_t * decoder, const void * src, lv_image_header_t * header) {
+static lv_result_t decoder_info(lv_image_decoder_t * decoder, lv_image_decoder_dsc_t * dsc, lv_image_header_t * header) {
     (void) decoder;
-    const char * path = (const char *)src;
+    const char * path = (const char *)dsc->src;
 
     // Check if the source is a file path and has the correct extension
-    if(lv_image_src_get_type(src) != LV_IMAGE_SRC_FILE) return LV_RESULT_INVALID;
+    if(lv_image_src_get_type(dsc->src) != LV_IMAGE_SRC_FILE) return LV_RESULT_INVALID;
     if(strcmp(lv_fs_get_ext(path), "rgb565") != 0) return LV_RESULT_INVALID;
 
     // Read the 12-byte header
