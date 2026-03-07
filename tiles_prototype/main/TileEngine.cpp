@@ -243,8 +243,9 @@ static void tile_event_cb(lv_event_t * e) {
         ESP_LOGI("TileEngine", "Single Tile: Draw Main Begin");
     } else if(code == LV_EVENT_READY) {
         ESP_LOGI("TileEngine", "Single Tile: Ready (Image Loaded)");
-    } else if(code == LV_EVENT_ERROR) {
-        ESP_LOGE("TileEngine", "Single Tile: Draw Error!");
+    } else {
+        // Log other events to help identify status (using ESP_LOGI for visibility)
+        ESP_LOGI("TileEngine", "Single Tile: Event %d", code);
     }
 }
 
