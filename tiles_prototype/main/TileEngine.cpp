@@ -1,5 +1,6 @@
 #define _USE_MATH_DEFINES
 #include "TileEngine.hpp"
+#include "src/draw/lv_image_decoder_private.h"
 #include <cmath>
 #include <cstdio>
 #include <dirent.h>
@@ -11,14 +12,17 @@
 #define JPEG_FORMAT   1
 #define PNG_FORMAT    2
 #define RGB565_FORMAT 3
-#define TILE_FORMAT RGB565_FORMAT
+#define TILE_FORMAT JPEG_FORMAT
 
 #if TILE_FORMAT == JPEG_FORMAT
 #define TILE_EXTENTION "jpg"
+#define TILE_PATH_BASE_DIR "/tiles-jpg"
 #elif TILE_FORMAT == PNG_FORMAT
 #define TILE_EXTENTION "png"
+#define TILE_PATH_BASE_DIR "/tiles-png"
 #elif TILE_FORMAT == RGB565_FORMAT
 #define TILE_EXTENTION "rgb565"
+#define TILE_PATH_BASE_DIR "/tiles-rgb565"
 #endif
 
 static const char* TAG = "TileEngine";
@@ -57,12 +61,73 @@ void list_sd_card_contents(const char *main_dir) {
     // 4. Fermer le répertoire
     lv_fs_dir_close(&dir);
 }
-
 TileEngine::TileEngine() : _map_container(nullptr) {}
 
 TileEngine::~TileEngine() {}
 
+static lv_result_t rgb565_decoder_info(lv_image_decoder_t * decoder, lv_image_decoder_dsc_t * dsc, lv_image_header_t * header) {
+    if(dsc->src_type == LV_IMAGE_SRC_FILE) {
+        const char * path = (const char *)dsc->src;
+        if(strstr(path, ".rgb565") != NULL) {
+            header->cf = LV_COLOR_FORMAT_RGB565;
+            header->w = 256;
+            header->h = 256;
+            header->stride = 256 * 2;
+            header->magic = LV_IMAGE_HEADER_MAGIC;
+            return LV_RESULT_OK;
+        }
+    }
+    return LV_RESULT_INVALID;
+}
+
+static lv_result_t rgb565_decoder_open(lv_image_decoder_t * decoder, lv_image_decoder_dsc_t * dsc) {
+    if(dsc->src_type == LV_IMAGE_SRC_FILE) {
+        const char * path = (const char *)dsc->src;
+        if(strstr(path, ".rgb565") != NULL) {
+            uint32_t w = 256;
+            uint32_t h = 256;
+            lv_draw_buf_t * draw_buf = lv_draw_buf_create(w, h, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
+            if(!draw_buf) return LV_RESULT_INVALID;
+
+            lv_fs_file_t f;
+            lv_fs_res_t res = lv_fs_open(&f, path, LV_FS_MODE_RD);
+            if(res != LV_FS_RES_OK) {
+                lv_draw_buf_destroy(draw_buf);
+                return LV_RESULT_INVALID;
+            }
+
+            uint32_t br;
+            res = lv_fs_read(&f, draw_buf->data, draw_buf->data_size, &br);
+            lv_fs_close(&f);
+
+            if(res != LV_FS_RES_OK || br != draw_buf->data_size) {
+                lv_draw_buf_destroy(draw_buf);
+                return LV_RESULT_INVALID;
+            }
+
+            dsc->decoded = draw_buf;
+            return LV_RESULT_OK;
+        }
+    }
+    return LV_RESULT_INVALID;
+}
+
+static void rgb565_decoder_close(lv_image_decoder_t * decoder, lv_image_decoder_dsc_t * dsc) {
+    if(dsc->decoded) {
+        lv_draw_buf_destroy((lv_draw_buf_t *)dsc->decoded);
+        dsc->decoded = NULL;
+    }
+}
+
+void TileEngine::lv_rgb565_decoder_init() {
+    lv_image_decoder_t * decoder = lv_image_decoder_create();
+    lv_image_decoder_set_info_cb(decoder, rgb565_decoder_info);
+    lv_image_decoder_set_open_cb(decoder, rgb565_decoder_open);
+    lv_image_decoder_set_close_cb(decoder, rgb565_decoder_close);
+}
+
 void TileEngine::init() {
+    lv_rgb565_decoder_init();
     _map_container = lv_obj_create(lv_screen_active());
     // Remove all default styles first, then set our own properties
     lv_obj_remove_style_all(_map_container);
@@ -100,9 +165,9 @@ void TileEngine::latLonToTile(double lat, double lon, int zoom, double& x, doubl
 
 void TileEngine::getTilePath(char* buf, size_t buf_size, int zoom, int x, int y, bool for_lvgl) {
     if (for_lvgl) {
-        snprintf(buf, buf_size, "%s%s/%d/%d/%d." TILE_EXTENTION, LV_DRIVE_PREFIX, TILE_PATH_BASE, zoom, x, y);
+        snprintf(buf, buf_size, "%s%s/%d/%d/%d." TILE_EXTENTION, LV_DRIVE_PREFIX, TILE_PATH_BASE_DIR, zoom, x, y);
     } else {
-        snprintf(buf, buf_size, "/sdcard%s/%d/%d/%d." TILE_EXTENTION, TILE_PATH_BASE, zoom, x, y);
+        snprintf(buf, buf_size, "/sdcard%s/%d/%d/%d." TILE_EXTENTION, TILE_PATH_BASE_DIR, zoom, x, y);
     }
 }
 

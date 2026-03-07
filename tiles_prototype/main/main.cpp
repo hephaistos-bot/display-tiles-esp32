@@ -245,7 +245,10 @@ void hardware_init(void) {
     ESP_LOGI(TAG, "Touch controller initialized successfully.");
 
    // SD Card Initialization
-    ESP_ERROR_CHECK(init_sd_card());
+    esp_err_t ret = init_sd_card();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to mount SD card (%s). Continuing without tiles.", esp_err_to_name(ret));
+    }
 }
 
 esp_err_t init_sd_card(void) {

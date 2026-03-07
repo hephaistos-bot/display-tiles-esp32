@@ -16,6 +16,8 @@ public:
     void setMapCenter(double lat, double lon, int zoom);
     void debug(double lat, double lon, int zoom);
 
+    static void lv_rgb565_decoder_init();
+
 private:
     struct TileInfo {
         lv_obj_t* img_obj;
