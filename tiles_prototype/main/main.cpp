@@ -87,7 +87,8 @@ extern "C" void app_main(void) {
 
     // 2. Setup LVGL Synchronization and Task
     lvgl_mux = xSemaphoreCreateRecursiveMutex();
-    xTaskCreate(lvgl_init_task, "LVGL", 1024 * 16, NULL, 5, NULL);
+    // Increase stack size to 64KB for LodePNG and FatFS operations
+    xTaskCreate(lvgl_init_task, "LVGL", 1024 * 64, NULL, 5, NULL);
 }
 
 void hardware_init(void) {

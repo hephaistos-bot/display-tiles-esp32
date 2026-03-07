@@ -265,6 +265,12 @@ static void tile_event_cb(lv_event_t * e) {
 void TileEngine::displaySingleTile(const char* path) {
     ESP_LOGI(TAG, "Displaying single tile debug: %s", path);
 
+#ifdef LV_USE_LODEPNG
+    ESP_LOGI(TAG, "Compile-time check: LV_USE_LODEPNG is DEFINED (Value: %d)", LV_USE_LODEPNG);
+#else
+    ESP_LOGE(TAG, "Compile-time check: LV_USE_LODEPNG is NOT DEFINED! PNG decoding will fail.");
+#endif
+
     // 1. Cleanup existing engine state to isolate test
     if (_map_container) {
         lv_obj_delete(_map_container);
@@ -334,4 +340,8 @@ void TileEngine::displaySingleTile(const char* path) {
 
     // Add event callback for debugging rendering lifecycle
     lv_obj_add_event_cb(img, tile_event_cb, LV_EVENT_ALL, NULL);
+
+    // 7. Force a full screen refresh
+    lv_obj_invalidate(lv_screen_active());
+    ESP_LOGI(TAG, "Requested full screen invalidation.");
 }
