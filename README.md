@@ -2,7 +2,7 @@
 
 This document outlines the planned and potential optimizations to improve the display speed of the Map Tile Engine on the ESP32-S3-Touch-LCD-5.
 
-Currently, `TileEngine::updateTiles` takes approximately **280ms** to refresh 20 tiles (5x4 grid). Our goal is to reduce this blocking time to ensure a smooth UI, especially for future scrolling and zooming.
+Currently, `TileEngine::updateTiles` takes **279608 us** (approx. 280ms) to refresh 20 tiles (5x4 grid). Our goal is to reduce this blocking time to ensure a smooth UI, especially for future scrolling and zooming.
 
 ## 1. Eliminate Synchronous I/O (`stat()` and `fopen`)
 **Issue:** The current implementation calls `stat()` for every tile on every update to check if the file exists before passing it to LVGL. LVGL then performs its own `fopen` and header reading. On a FatFS-over-SPI system, these metadata operations are expensive and synchronous.
