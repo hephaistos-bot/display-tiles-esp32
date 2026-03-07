@@ -23,6 +23,87 @@
 
 static const char* TAG = "TileEngine";
 
+#if TILE_FORMAT == RGB565_FORMAT
+static lv_result_t decoder_info(lv_image_decoder_t * decoder, const void * src, lv_image_header_t * header) {
+    (void) decoder;
+    const char * path = (const char *)src;
+
+    // Check if the source is a file path and has the correct extension
+    if(lv_image_src_get_type(src) != LV_IMAGE_SRC_FILE) return LV_RESULT_INVALID;
+    if(strcmp(lv_fs_get_ext(path), "rgb565") != 0) return LV_RESULT_INVALID;
+
+    // Read the 12-byte header
+    lv_fs_file_t f;
+    lv_fs_res_t res = lv_fs_open(&f, path, LV_FS_MODE_RD);
+    if(res != LV_FS_RES_OK) return LV_RESULT_INVALID;
+
+    uint8_t header_buf[12];
+    uint32_t br;
+    res = lv_fs_read(&f, header_buf, 12, &br);
+    lv_fs_close(&f);
+
+    if(res != LV_FS_RES_OK || br < 12) return LV_RESULT_INVALID;
+
+    // Validate Magic (0x19) and Color Format (0x12 for RGB565)
+    // Structure: <BBHHHhh (Magic: 1B, Format: 1B, Flags: 2B, Width: 2B, Height: 2B, Stride: 2B, Reserved: 2B)
+    if(header_buf[0] != 0x19 || header_buf[1] != 0x12) return LV_RESULT_INVALID;
+
+    // Extract dimensions and stride from the header (Little Endian)
+    // Header format offsets based on struct.pack('<BBHHHhh', ...)
+    // [0] Magic, [1] Format, [2-3] Flags, [4-5] Width, [6-7] Height, [8-9] Stride, [10-11] Reserved
+    header->w = header_buf[4] | (header_buf[5] << 8);
+    header->h = header_buf[6] | (header_buf[7] << 8);
+    header->cf = LV_COLOR_FORMAT_RGB565;
+    header->magic = LV_IMAGE_HEADER_MAGIC;
+    header->stride = header_buf[8] | (header_buf[9] << 8);
+
+    return LV_RESULT_OK;
+}
+
+static lv_result_t decoder_open(lv_image_decoder_t * decoder, lv_image_decoder_dsc_t * dsc) {
+    (void) decoder;
+    const char * path = (const char *)dsc->src;
+
+    // Allocate memory for the pixel data in PSRAM
+    uint32_t data_size = dsc->header.stride * dsc->header.h;
+    uint8_t * pixels = (uint8_t *)heap_caps_malloc(data_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if(!pixels) {
+        ESP_LOGE(TAG, "Failed to allocate PSRAM for tile: %s", path);
+        return LV_RESULT_INVALID;
+    }
+
+    // Read the pixel data (skip the 12-byte header)
+    lv_fs_file_t f;
+    lv_fs_res_t res = lv_fs_open(&f, path, LV_FS_MODE_RD);
+    if(res != LV_FS_RES_OK) {
+        heap_caps_free(pixels);
+        return LV_RESULT_INVALID;
+    }
+
+    lv_fs_seek(&f, 12, LV_FS_SEEK_SET);
+    uint32_t br;
+    res = lv_fs_read(&f, pixels, data_size, &br);
+    lv_fs_close(&f);
+
+    if(res != LV_FS_RES_OK || br != data_size) {
+        ESP_LOGE(TAG, "Failed to read pixels from %s (read %lu, expected %lu)", path, br, data_size);
+        heap_caps_free(pixels);
+        return LV_RESULT_INVALID;
+    }
+
+    dsc->img_data = pixels;
+    return LV_RESULT_OK;
+}
+
+static void decoder_close(lv_image_decoder_t * decoder, lv_image_decoder_dsc_t * dsc) {
+    (void) decoder;
+    if(dsc->img_data) {
+        heap_caps_free((void *)dsc->img_data);
+        dsc->img_data = NULL;
+    }
+}
+#endif
+
 void list_sd_card_contents(const char *main_dir) {
     lv_fs_dir_t dir;
     lv_fs_res_t res;
@@ -63,6 +144,13 @@ TileEngine::TileEngine() : _map_container(nullptr) {}
 TileEngine::~TileEngine() {}
 
 void TileEngine::init() {
+#if TILE_FORMAT == RGB565_FORMAT
+    lv_image_decoder_t * decoder = lv_image_decoder_create();
+    lv_image_decoder_set_info_cb(decoder, decoder_info);
+    lv_image_decoder_set_open_cb(decoder, decoder_open);
+    lv_image_decoder_set_close_cb(decoder, decoder_close);
+#endif
+
     _map_container = lv_obj_create(lv_screen_active());
     // Remove all default styles first, then set our own properties
     lv_obj_remove_style_all(_map_container);
@@ -155,6 +243,9 @@ void TileEngine::updateTiles(double lat, double lon, int zoom) {
                 if (stat(tile.path, &st) == 0) {
                     getTilePath(tile.path, sizeof(tile.path), zoom, tile_idx_x, tile_idx_y, true);
                     lv_image_set_src(tile.img_obj, tile.path);
+                } else {
+                    // Clear the tile if not found to prevent showing stale data
+                    lv_image_set_src(tile.img_obj, NULL);
                 }
             }
         }
@@ -220,12 +311,12 @@ void TileEngine::debug(double lat, double lon, int zoom) {
                 // On revient au début : fseek(f, 0, SEEK_SET)
                 lv_fs_seek(&f, 0, LV_FS_SEEK_SET);
                 // --- Lecture du Header ---
-                uint8_t header[8];
+                uint8_t header[12];
                 uint32_t br; // Bytes Read (indispensable avec LVGL)
                 bool signature_ok = false;
                 // lv_fs_read prend l'adresse de br pour retourner le nombre d'octets lus
-                res = lv_fs_read(&f, header, 8, &br);
-                if (res == LV_FS_RES_OK && br == 8) {
+                res = lv_fs_read(&f, header, 12, &br);
+                if (res == LV_FS_RES_OK && br >= 8) {
 #if TILE_FORMAT == PNG_FORMAT
                     // PNG Signature: 89 50 4E 47 0D 0A 1A 0A
                     if (header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47 &&
@@ -236,6 +327,12 @@ void TileEngine::debug(double lat, double lon, int zoom) {
 #elif TILE_FORMAT == JPEG_FORMAT
                     // Signature JPEG : FF D8 FF
                     if (header[0] == 0xFF && header[1] == 0xD8 && header[2] == 0xFF) {
+                        signature_ok = true;
+                        total_valid++;
+                    }
+#elif TILE_FORMAT == RGB565_FORMAT
+                    // LVGL Binary Image Magic: 0x19, Format: 0x12 (RGB565)
+                    if (header[0] == 0x19 && header[1] == 0x12) {
                         signature_ok = true;
                         total_valid++;
                     }
