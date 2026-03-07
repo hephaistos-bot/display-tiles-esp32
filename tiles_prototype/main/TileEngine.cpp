@@ -60,13 +60,22 @@ TileEngine::~TileEngine() {}
 
 void TileEngine::init() {
     _map_container = lv_obj_create(lv_screen_active());
-    lv_obj_set_size(_map_container, SCREEN_WIDTH, SCREEN_HEIGHT);
+    // Remove all default styles first, then set our own properties
     lv_obj_remove_style_all(_map_container);
-    lv_obj_set_scrollbar_mode(_map_container, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_size(_map_container, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+    // Set a dark background to show while tiles are loading
+    lv_obj_set_style_bg_color(_map_container, lv_color_make(30, 30, 30), 0);
+    lv_obj_set_style_bg_opa(_map_container, LV_OPA_COVER, 0);
+
+    // Ensure the container itself doesn't scroll; it's a fixed viewport for our tile grid
+    lv_obj_remove_flag(_map_container, LV_OBJ_FLAG_SCROLLABLE);
 
     for (int r = 0; r < GRID_ROWS; ++r) {
         for (int c = 0; c < GRID_COLS; ++c) {
             lv_obj_t* img = lv_image_create(_map_container);
+            // Explicitly set tile size to avoid auto-layout or initialization glitches
+            lv_obj_set_size(img, TILE_SIZE, TILE_SIZE);
             lv_image_set_inner_align(img, LV_IMAGE_ALIGN_CENTER);
             TileInfo info = {img, -1, -1, -1, ""};
             _tile_grid.push_back(info);
