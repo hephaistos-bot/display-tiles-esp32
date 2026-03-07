@@ -294,6 +294,21 @@ void TileEngine::displaySingleTile(const char* path) {
     ESP_LOGI(TAG, "Sanity Check: Created Red rectangle at (20,20)");
 
     // 4. Try to open file directly via LVGL FS to confirm access
+    // First use stat() as a sanity check to avoid crashes on some FatFS ports
+    char std_path[128];
+    if (path[0] == 'S' && path[1] == ':') {
+        snprintf(std_path, sizeof(std_path), "/sdcard%s", path + 2);
+    } else {
+        strncpy(std_path, path, sizeof(std_path));
+    }
+
+    struct stat st;
+    if (stat(std_path, &st) != 0) {
+        ESP_LOGE(TAG, "Standard FS Check: FAILED - %s not found on SD card.", std_path);
+        return;
+    }
+    ESP_LOGI(TAG, "Standard FS Check: SUCCESS - %s exists, size %ld", std_path, st.st_size);
+
     lv_fs_file_t f;
     lv_fs_res_t fs_res = lv_fs_open(&f, path, LV_FS_MODE_RD);
     if (fs_res == LV_FS_RES_OK) {

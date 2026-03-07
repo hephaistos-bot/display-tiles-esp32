@@ -392,17 +392,17 @@ void lvgl_init_task(void *arg) {
     lv_init();
     lv_tick_set_cb(lvgl_tick_cb);
 
-    // Allocate draw buffers in internal SRAM for performance
+    // Allocate draw buffers in PSRAM (Internal SRAM is too small for 800x40 double buffers + 64KB stack)
     uint32_t buffer_size = LCD_H_RES * 40;
-    lv_color_t *buf1 = (lv_color_t *)heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    lv_color_t *buf2 = (lv_color_t *)heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    lv_color_t *buf1 = (lv_color_t *)heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    lv_color_t *buf2 = (lv_color_t *)heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 
     if (!buf1) {
-        ESP_LOGE(TAG, "Failed to allocate LVGL draw buffers in internal SRAM buf1");
+        ESP_LOGE(TAG, "Failed to allocate LVGL draw buffers in PSRAM buf1");
         abort();
     }
     if (!buf2) {
-        ESP_LOGE(TAG, "Failed to allocate LVGL draw buffers in internal SRAM buf2");
+        ESP_LOGE(TAG, "Failed to allocate LVGL draw buffers in PSRAM buf2");
         abort();
     }
 
