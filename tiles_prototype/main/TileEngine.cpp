@@ -329,7 +329,7 @@ void TileEngine::displaySingleTile(const char* path) {
     // Add a label to confirm position even if image fails
     lv_obj_t* label_tile = lv_label_create(img);
     lv_label_set_text(label_tile, "TILE");
-    lv_obj_set_style_text_color(label_tile, lv_palette_main(LV_PALETTE_BLACK), 0);
+    lv_obj_set_style_text_color(label_tile, lv_color_black(), 0);
     lv_obj_center(label_tile);
 
     // Add event callback for debugging rendering lifecycle
