@@ -56,12 +56,16 @@ public:
     esp_err_t setSDCardSelected(bool selected);
     esp_err_t setD0(bool level);
     esp_err_t setD1(bool level);
+    esp_err_t setDI0(bool level);
+    esp_err_t setDI1(bool level);
 
     // --- Getters (State Reads) ---
     esp_err_t getLCDReset(bool *active);
     esp_err_t getTouchReset(bool *active);
     esp_err_t getBacklight(bool *active);
     esp_err_t getSDCardSelected(bool *selected);
+    esp_err_t getDI0(bool *level);
+    esp_err_t getDI1(bool *level);
 
 private:
     // Config Register (8-bit at 0x24)
@@ -72,10 +76,12 @@ private:
     static constexpr uint8_t BIT_CFG_IO_OE    = (1 << 0);
 
     // IO Register (8-bit at 0x38)
+    static constexpr uint8_t BIT_IO_DI0       = (1 << 0);
     static constexpr uint8_t BIT_IO_TP_RST    = (1 << 1);
     static constexpr uint8_t BIT_IO_LCD_BL    = (1 << 2);
     static constexpr uint8_t BIT_IO_LCD_RST   = (1 << 3);
     static constexpr uint8_t BIT_IO_SD_CS     = (1 << 4);
+    static constexpr uint8_t BIT_IO_DI1       = (1 << 5);
 
     // OC Register bits (4-bit at 0x23)
     static constexpr uint8_t BIT_OC_DO0       = (1 << 0);

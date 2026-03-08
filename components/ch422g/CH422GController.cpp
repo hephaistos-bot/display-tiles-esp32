@@ -123,6 +123,18 @@ esp_err_t CH422GController::setD1(bool level) {
     return writeOC(m_oc_cache);
 }
 
+esp_err_t CH422GController::setDI0(bool level) {
+    if (level) m_io_cache |= BIT_IO_DI0;
+    else       m_io_cache &= ~BIT_IO_DI0;
+    return writeIO(m_io_cache);
+}
+
+esp_err_t CH422GController::setDI1(bool level) {
+    if (level) m_io_cache |= BIT_IO_DI1;
+    else       m_io_cache &= ~BIT_IO_DI1;
+    return writeIO(m_io_cache);
+}
+
 // --- Getters ---
 
 esp_err_t CH422GController::getLCDReset(bool *active) {
@@ -147,6 +159,26 @@ esp_err_t CH422GController::getSDCardSelected(bool *selected) {
     if (!selected) return ESP_ERR_INVALID_ARG;
     *selected = !(m_io_cache & BIT_IO_SD_CS);
     return ESP_OK;
+}
+
+esp_err_t CH422GController::getDI0(bool *level) {
+    if (!level) return ESP_ERR_INVALID_ARG;
+    uint8_t val;
+    esp_err_t ret = readIO(&val);
+    if (ret == ESP_OK) {
+        *level = (val & BIT_IO_DI0);
+    }
+    return ret;
+}
+
+esp_err_t CH422GController::getDI1(bool *level) {
+    if (!level) return ESP_ERR_INVALID_ARG;
+    uint8_t val;
+    esp_err_t ret = readIO(&val);
+    if (ret == ESP_OK) {
+        *level = (val & BIT_IO_DI1);
+    }
+    return ret;
 }
 
 // --- Private Helpers ---
