@@ -17,6 +17,7 @@ public:
     void debug(double lat, double lon, int zoom);
 
     static void lv_rgb565_decoder_init();
+    static void lv_jpeg_esp_decoder_init();
 
 private:
     struct TileInfo {

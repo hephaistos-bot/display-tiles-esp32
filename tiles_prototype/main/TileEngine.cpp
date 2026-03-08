@@ -7,6 +7,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
+#include "esp_jpeg_dec.h" // For optimized S3 JPEG decoding
 
 #include <sys/stat.h>
 
@@ -31,6 +32,135 @@ static const char* TAG = "TileEngine";
 extern "C" {
     extern volatile int64_t update_start_time;
     extern volatile bool measure_next_flush;
+}
+
+// Optimized JPEG Decoder using esp_new_jpeg for ESP32-S3 SIMD speedup
+static lv_result_t jpeg_esp_decoder_info(lv_image_decoder_t * decoder, lv_image_decoder_dsc_t * dsc, lv_image_header_t * header) {
+    if(dsc->src_type == LV_IMAGE_SRC_FILE) {
+        const char * path = (const char *)dsc->src;
+        if(strstr(path, ".jpg") != NULL || strstr(path, ".jpeg") != NULL) {
+            header->cf = LV_COLOR_FORMAT_RGB565;
+            header->w = 256;
+            header->h = 256;
+            header->stride = 256 * 2;
+            header->magic = LV_IMAGE_HEADER_MAGIC;
+            return LV_RESULT_OK;
+        }
+    }
+    return LV_RESULT_INVALID;
+}
+
+static lv_result_t jpeg_esp_decoder_open(lv_image_decoder_t * decoder, lv_image_decoder_dsc_t * dsc) {
+    if(dsc->src_type == LV_IMAGE_SRC_FILE) {
+        const char * lv_path = (const char *)dsc->src;
+        if(strstr(lv_path, ".jpg") != NULL || strstr(lv_path, ".jpeg") != NULL) {
+            char posix_path[128];
+            if (lv_path[0] == 'S' && lv_path[1] == ':') {
+                snprintf(posix_path, sizeof(posix_path), "/sdcard%s", lv_path + 2);
+            } else {
+                return LV_RESULT_INVALID;
+            }
+
+            FILE* f = fopen(posix_path, "rb");
+            if(!f) return LV_RESULT_INVALID;
+
+            fseek(f, 0, SEEK_END);
+            long file_size = ftell(f);
+            fseek(f, 0, SEEK_SET);
+
+            uint8_t* jpeg_data = (uint8_t*)heap_caps_malloc(file_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if(!jpeg_data) {
+                fclose(f);
+                return LV_RESULT_INVALID;
+            }
+
+            fread(jpeg_data, 1, file_size, f);
+            fclose(f);
+
+            jpeg_dec_config_t config = DEFAULT_JPEG_DEC_CONFIG();
+            config.output_type = JPEG_PIXEL_FORMAT_RGB565_LE;
+            
+            jpeg_dec_handle_t jpeg_dec;
+            jpeg_error_t jerr = jpeg_dec_open(&config, &jpeg_dec);
+            if(jerr != JPEG_ERR_OK) {
+                free(jpeg_data);
+                return LV_RESULT_INVALID;
+            }
+
+            jpeg_dec_io_t io = {
+                .inbuf = jpeg_data,
+                .inbuf_len = (int)file_size,
+                .inbuf_remain = 0,
+                .outbuf = NULL,
+                .out_size = 0
+            };
+
+            jpeg_dec_header_info_t out_info;
+            jerr = jpeg_dec_parse_header(jpeg_dec, &io, &out_info);
+            if(jerr != JPEG_ERR_OK) {
+                jpeg_dec_close(jpeg_dec);
+                free(jpeg_data);
+                return LV_RESULT_INVALID;
+            }
+
+            uint32_t w = out_info.width;
+            uint32_t h = out_info.height;
+            uint32_t stride = w * 2;
+            uint32_t data_size = stride * h;
+
+            lv_draw_buf_t * draw_buf = (lv_draw_buf_t *)lv_malloc(sizeof(lv_draw_buf_t));
+            if(!draw_buf) {
+                jpeg_dec_close(jpeg_dec);
+                free(jpeg_data);
+                return LV_RESULT_INVALID;
+            }
+
+            // Align 16 bytes for S3 SIMD as required by esp_new_jpeg
+            void * data = heap_caps_aligned_alloc(16, data_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if(!data) {
+                lv_free(draw_buf);
+                jpeg_dec_close(jpeg_dec);
+                free(jpeg_data);
+                return LV_RESULT_INVALID;
+            }
+
+            lv_draw_buf_init(draw_buf, w, h, LV_COLOR_FORMAT_RGB565, stride, data, data_size);
+
+            io.outbuf = (uint8_t*)draw_buf->data;
+            io.out_size = (int)data_size;
+
+            jerr = jpeg_dec_process(jpeg_dec, &io);
+            jpeg_dec_close(jpeg_dec);
+            free(jpeg_data);
+
+            if (jerr != JPEG_ERR_OK) {
+                heap_caps_free(data);
+                lv_free(draw_buf);
+                return LV_RESULT_INVALID;
+            }
+
+            dsc->decoded = draw_buf;
+            return LV_RESULT_OK;
+        }
+    }
+    return LV_RESULT_INVALID;
+}
+
+static void jpeg_esp_decoder_close(lv_image_decoder_t * decoder, lv_image_decoder_dsc_t * dsc) {
+    if(dsc->decoded) {
+        lv_draw_buf_t * draw_buf = (lv_draw_buf_t *)dsc->decoded;
+        if(draw_buf->data) heap_caps_free(draw_buf->data);
+        lv_free(draw_buf);
+        dsc->decoded = NULL;
+    }
+}
+
+void TileEngine::lv_jpeg_esp_decoder_init() {
+    ESP_LOGI("TileDecoder", "Registering optimized S3 JPEG decoder");
+    lv_image_decoder_t * decoder = lv_image_decoder_create();
+    lv_image_decoder_set_info_cb(decoder, jpeg_esp_decoder_info);
+    lv_image_decoder_set_open_cb(decoder, jpeg_esp_decoder_open);
+    lv_image_decoder_set_close_cb(decoder, jpeg_esp_decoder_close);
 }
 
 void list_sd_card_contents(const char *main_dir) {
@@ -167,6 +297,7 @@ void TileEngine::lv_rgb565_decoder_init() {
 void TileEngine::init() {
     ESP_LOGI(TAG, "Initializing TileEngine");
     lv_rgb565_decoder_init();
+    lv_jpeg_esp_decoder_init();
     _map_container = lv_obj_create(lv_screen_active());
     // Remove all default styles first, then set our own properties
     lv_obj_remove_style_all(_map_container);
