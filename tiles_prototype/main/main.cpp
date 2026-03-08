@@ -337,31 +337,42 @@ static uint32_t lvgl_tick_cb(void) {
     return esp_timer_get_time() / 1000;
 }
 
+// Structure to hold multi-touch data for the TileEngine
+struct TouchUserData {
+    esp_lcd_touch_handle_t tp;
+    lv_point_t points[2];
+    uint8_t count;
+};
+
 // LVGL Touch Read Callback
 static void lvgl_touch_read_cb(lv_indev_t * indev, lv_indev_data_t * data) {
-    esp_lcd_touch_handle_t tp = (esp_lcd_touch_handle_t)lv_indev_get_user_data(indev);
-    if (!tp) {
+    TouchUserData * user_data = (TouchUserData *)lv_indev_get_user_data(indev);
+    if (!user_data || !user_data->tp) {
         data->state = LV_INDEV_STATE_RELEASED;
         return;
     }
 
     uint8_t point_cnt = 0;
-    esp_lcd_touch_point_data_t pt;
+    esp_lcd_touch_point_data_t pts[2];
 
-    if (esp_lcd_touch_read_data(tp) == ESP_OK) {
-        if (esp_lcd_touch_get_data(tp, &pt, &point_cnt, 1) == ESP_OK && point_cnt > 0) {
-            data->point.x = pt.x;
-            data->point.y = pt.y;
+    if (esp_lcd_touch_read_data(user_data->tp) == ESP_OK) {
+        if (esp_lcd_touch_get_data(user_data->tp, pts, &point_cnt, 2) == ESP_OK && point_cnt > 0) {
+            user_data->count = point_cnt;
+            user_data->points[0].x = pts[0].x;
+            user_data->points[0].y = pts[0].y;
+            
+            data->point.x = pts[0].x;
+            data->point.y = pts[0].y;
             data->state = LV_INDEV_STATE_PRESSED;
 
-            static uint32_t last_log = 0;
-            if (lv_tick_get() - last_log > 2000) {
-                ESP_LOGI(TAG, "Touch detected at (%d, %d)", (int)pt.x, (int)pt.y);
-                last_log = lv_tick_get();
+            if (point_cnt > 1) {
+                user_data->points[1].x = pts[1].x;
+                user_data->points[1].y = pts[1].y;
             }
             return;
         }
     }
+    user_data->count = 0;
     data->state = LV_INDEV_STATE_RELEASED;
 }
 
@@ -427,9 +438,13 @@ void lvgl_init_task(void *arg) {
 
     // Register Touch Input Device
     if (tp_handle) {
+        static TouchUserData touch_user_data;
+        touch_user_data.tp = tp_handle;
+        touch_user_data.count = 0;
+
         lv_indev_t * indev = lv_indev_create();
         lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
-        lv_indev_set_user_data(indev, tp_handle);
+        lv_indev_set_user_data(indev, &touch_user_data);
         lv_indev_set_read_cb(indev, lvgl_touch_read_cb);
     }
 

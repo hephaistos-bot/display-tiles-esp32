@@ -1,5 +1,6 @@
 #define _USE_MATH_DEFINES
 #include "TileEngine.hpp"
+#include "esp_lcd_touch.h"
 #include "src/draw/lv_image_decoder_private.h"
 #include <cmath>
 #include <cstdio>
@@ -265,6 +266,7 @@ void TileEngine::lv_rgb565_decoder_init() {
 
 void TileEngine::init() {
     ESP_LOGI(TAG, "Initializing TileEngine with container layer");
+    loadConfig();
     lv_rgb565_decoder_init();
     lv_jpeg_esp_decoder_init();
 
@@ -273,6 +275,8 @@ void TileEngine::init() {
     lv_obj_set_size(_map_container, SCREEN_WIDTH, SCREEN_HEIGHT);
     lv_obj_set_style_bg_color(_map_container, lv_color_make(30, 30, 30), 0);
     lv_obj_set_style_bg_opa(_map_container, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_all(_map_container, 0, 0);
+    lv_obj_set_style_border_width(_map_container, 0, 0);
     lv_obj_remove_flag(_map_container, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(_map_container, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_user_data(_map_container, this);
@@ -281,15 +285,22 @@ void TileEngine::init() {
     _tile_layer = lv_obj_create(_map_container);
     lv_obj_remove_style_all(_tile_layer);
     lv_obj_set_size(_tile_layer, TILE_SIZE * GRID_COLS, TILE_SIZE * GRID_ROWS);
+    lv_obj_set_style_pad_all(_tile_layer, 0, 0);
+    lv_obj_set_style_border_width(_tile_layer, 0, 0);
     lv_obj_remove_flag(_tile_layer, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_remove_flag(_tile_layer, LV_OBJ_FLAG_CLICKABLE);
 
     for (int r = 0; r < GRID_ROWS; ++r) {
         for (int c = 0; c < GRID_COLS; ++c) {
             lv_obj_t* img = lv_image_create(_tile_layer);
+            lv_obj_remove_style_all(img);
             lv_obj_set_size(img, TILE_SIZE, TILE_SIZE);
             lv_obj_set_pos(img, c * TILE_SIZE, r * TILE_SIZE);
-            lv_image_set_inner_align(img, LV_IMAGE_ALIGN_CENTER);
+            // Ensure no border, outline or padding is added by default themes
+            lv_obj_set_style_border_width(img, 0, 0);
+            lv_obj_set_style_outline_width(img, 0, 0);
+            lv_obj_set_style_pad_all(img, 0, 0);
+            
             TileInfo info = {img, -1, -1, -1, ""};
             _tile_grid.push_back(info);
         }
@@ -299,7 +310,11 @@ void TileEngine::init() {
 void TileEngine::setMapCenter(double lat, double lon, int zoom) {
     _current_lat = lat;
     _current_lon = lon;
+    
+    if (zoom < _min_zoom) zoom = _min_zoom;
+    if (zoom > _max_zoom) zoom = _max_zoom;
     _current_zoom = zoom;
+
     _base_tile_x = -1; // Force full refresh
     _base_tile_y = -1;
     updateTiles(lat, lon, zoom);
@@ -327,20 +342,70 @@ void TileEngine::getTilePath(char* buf, size_t buf_size, int zoom, int x, int y,
     }
 }
 
+// Structure to hold multi-touch data (shared with main.cpp)
+struct TouchUserData {
+    esp_lcd_touch_handle_t tp;
+    lv_point_t points[2];
+    uint8_t count;
+};
+
 void TileEngine::event_handler(lv_event_t* e) {
     lv_event_code_t code = lv_event_get_code(e);
     lv_obj_t* obj = (lv_obj_t*)lv_event_get_target(e);
     TileEngine* engine = (TileEngine*)lv_obj_get_user_data(obj);
 
+    lv_indev_t* indev = lv_indev_active();
+    TouchUserData* touch_data = (TouchUserData*)lv_indev_get_user_data(indev);
+
     if (code == LV_EVENT_PRESSED) {
-        lv_indev_t* indev = lv_indev_active();
         lv_indev_get_point(indev, &engine->_last_drag_point);
+        engine->_is_pinching = false;
+        engine->_last_pinch_dist = 0;
     } else if (code == LV_EVENT_PRESSING) {
+        // --- Multi-touch Pinch to Zoom ---
+        if (touch_data && touch_data->count == 2) {
+            double dx = touch_data->points[0].x - touch_data->points[1].x;
+            double dy = touch_data->points[0].y - touch_data->points[1].y;
+            double dist = sqrt(dx*dx + dy*dy);
+
+            if (!engine->_is_pinching) {
+                engine->_is_pinching = true;
+                engine->_last_pinch_dist = dist;
+            } else {
+                uint32_t now = lv_tick_get();
+                if (now - engine->_last_zoom_time > 500) { // Cooldown between zoom steps
+                    bool zoomed = false;
+                    if (dist > engine->_last_pinch_dist * 1.5) { // Zoom In
+                        if (engine->_current_zoom < engine->_max_zoom) {
+                            engine->_current_zoom++;
+                            zoomed = true;
+                        }
+                        engine->_last_pinch_dist = dist;
+                    } else if (dist < engine->_last_pinch_dist * 0.6) { // Zoom Out
+                        if (engine->_current_zoom > engine->_min_zoom) {
+                            engine->_current_zoom--;
+                            zoomed = true;
+                        }
+                        engine->_last_pinch_dist = dist;
+                    }
+
+                    if (zoomed) {
+                        engine->_last_zoom_time = now;
+                        // Reset layer pos so it doesn't jump during zoom
+                        lv_obj_set_pos(engine->_tile_layer, 0, 0); 
+                        engine->_base_tile_x = -1; // Force full refresh
+                        engine->updateTiles(engine->_current_lat, engine->_current_lon, engine->_current_zoom);
+                    }
+                }
+            }
+            return; // Skip dragging if we are pinching
+        }
+
+        // --- Single-touch Dragging ---
         static uint32_t last_update = 0;
         uint32_t now = lv_tick_get();
         if (now - last_update < 20) return; // Limit logic updates to ~50fps
 
-        lv_indev_t* indev = lv_indev_active();
         lv_point_t current_point;
         lv_indev_get_point(indev, &current_point);
 
@@ -411,6 +476,47 @@ void TileEngine::updateTiles(double lat, double lon, int zoom) {
                 lv_image_set_src(tile.img_obj, tile.path);
             }
         }
+    }
+}
+
+void TileEngine::loadConfig() {
+    char base_path[128];
+    snprintf(base_path, sizeof(base_path), "/sdcard%s", TILE_PATH_BASE_DIR);
+    
+    DIR* dir = opendir(base_path);
+    if (dir == NULL) {
+        ESP_LOGW(TAG, "Could not open tiles directory: %s. Using defaults.", base_path);
+        _min_zoom = 1;
+        _max_zoom = 18;
+        return;
+    }
+
+    struct dirent* entry;
+    int min = 999;
+    int max = -1;
+
+    while ((entry = readdir(dir)) != NULL) {
+        // Skip . and ..
+        if (entry->d_name[0] == '.') continue;
+
+        // Try to parse the directory name as an integer (zoom level)
+        char* endptr;
+        int zoom = strtol(entry->d_name, &endptr, 10);
+        if (endptr != entry->d_name && *endptr == '\0') {
+            if (zoom < min) min = zoom;
+            if (zoom > max) max = zoom;
+        }
+    }
+    closedir(dir);
+
+    if (max != -1) {
+        _min_zoom = min;
+        _max_zoom = max;
+        ESP_LOGI(TAG, "Detected zoom range from SD directories: %d to %d", _min_zoom, _max_zoom);
+    } else {
+        ESP_LOGW(TAG, "No zoom level directories found in %s. Using defaults (1-18).", base_path);
+        _min_zoom = 1;
+        _max_zoom = 18;
     }
 }
 
