@@ -1,59 +1,75 @@
-# 🚀 Tile Engine Optimization: Investigation Points
+# 🗺️ ESP32-S3 Map Tile Viewer (Waveshare 5" LCD)
 
-This document outlines the planned and potential optimizations to improve the display speed of the Map Tile Engine on the ESP32-S3-Touch-LCD-5.
+This project implements a high-performance map tile engine for the **Waveshare ESP32-S3-Touch-LCD-5** using **ESP-IDF 6.1** and **LVGL 9.4**. It is designed to display 256x256 pixel map tiles from an SD card with smooth scrolling and pinch-to-zoom support.
 
-Currently, `TileEngine::updateTiles` takes approximately **280ms** to refresh 20 tiles (5x4 grid). Our goal is to reduce this blocking time to ensure a smooth UI, especially for future scrolling and zooming.
+## 🚀 Key Features
 
-### Note on Visual Latency
-While `updateTiles` logic finishes in ~280ms, the **visual display** of the tiles takes significantly longer. This is because:
-1. **Logic vs. Rendering:** The 280ms only measures the CPU time to calculate positions and set the file paths in LVGL.
-2. **Asynchronous Decoding:** The actual image decoding (JPEG/PNG) and SD card data transfer happen *later* during the LVGL draw cycle (`lv_timer_handler`).
-3. **Sequential Processing:** LVGL decodes tiles sequentially. Decoding 20 high-resolution tiles on a single core at 240MHz is the main bottleneck for the final "on-screen" result.
+*   **Optimized Tile Engine:** Efficient 5x3 grid (15 tiles) to cover the 800x480 screen.
+*   **Touch Interactivity:**
+    *   **Single-touch Drag:** Smoothly pan across the map.
+    *   **Pinch-to-Zoom:** Multi-touch support for zooming between map levels.
+*   **SIMD Accelerated Decoding:** Custom JPEG decoder leveraging the ESP32-S3's SIMD instructions (via `esp_new_jpeg`) for fast on-the-fly tile decompression.
+*   **Storage Support:** Custom SPI SD Card driver that integrates with the **CH422G I/O Expander** for manual Chip Select (CS) management.
+*   **PSRAM Double Buffering:** Full 800x480 framebuffers in octal PSRAM ensure tear-free animations.
+*   **Dynamic Cache:** 4MB LVGL image cache in PSRAM to store recently decoded tiles, reducing SD card I/O and CPU load.
 
-## 1. Eliminate Synchronous I/O (`stat()` and `fopen`)
-**Issue:** The current implementation calls `stat()` for every tile on every update to check if the file exists before passing it to LVGL. LVGL then performs its own `fopen` and header reading. On a FatFS-over-SPI system, these metadata operations are expensive and synchronous.
-**Proposed Solution:**
-- **File Indexing:** At startup, scan the `/sdcard/tiles` directory and store the available `zoom/x/y` triplets in a memory-efficient `std::unordered_set`.
-- **Note on ESP-IDF FatFS:** The `d_type` field in `struct dirent` is not supported. Use `stat()` during the initial scan to distinguish files from directories.
-- **Fast Lookup:** Replace the `stat()` call in the main loop with a fast in-memory lookup. This prevents blocking the UI thread with SD card latency during tile calculations.
+## 🛠️ Hardware Stack
 
-## 2. LVGL Image Cache Tuning
-**Issue:** Decoded images (especially JPEG/PNG) take significant time to process. If the cache is too small or improperly configured, tiles are re-decoded every time they move or re-enter the viewport.
-**Investigation:**
-- Ensure `CONFIG_LV_CACHE_DEF_SIZE` (currently 4MB) is fully utilized and that decoded bitmaps are stored in **PSRAM** (`MALLOC_CAP_SPIRAM`).
-- Verify that LVGL is not discarding tiles too early due to cache pressure.
-- For 20 tiles (256x256 at 16bpp), we need ~2.6MB of cache to keep all decoded tiles in memory simultaneously.
+*   **Display:** 5-inch 800x480 RGB LCD (16-bit color).
+*   **Controller:** ESP32-S3 (with Octal PSRAM).
+*   **Touch:** GT911 Capacitive Touch Controller (I2C).
+*   **I/O Expander:** CH422G (used for LCD reset, touch reset, backlight, and SD CS).
+*   **Storage:** microSD card slot connected via SPI.
 
-## 3. SPI Bus and FatFS Performance
-**Issue:** The SPI bus is currently running at **20MHz**. While standard, we should verify if the SD card can handle higher speeds (e.g., 40MHz) or if there's significant overhead in the `esp_vfs_fat` layer.
-**Optimization:**
-- Increase `host.max_freq_khz` if the hardware supports it.
-- Increase `mount_config.max_files` (e.g., to 20) to ensure LVGL can open multiple tiles concurrently without resource exhaustion.
+## 📂 Software Stack
 
-## 4. Tile Format: JPEG vs. PNG
-**Trade-off:**
-- **JPEG:** Smaller file size (faster I/O) but slightly more CPU-intensive to decode.
-- **PNG:** Larger file size (slower I/O) but potentially faster decoding if simple.
-**Investigation:** Benchmark both formats to see which yields a better "Total Time = I/O + Decode". JPEG is currently preferred for its lower I/O footprint on the SD card.
+*   **Framework:** ESP-IDF v6.1 (using the new `i2c_master` and `spi_master` drivers).
+*   **UI Library:** LVGL v9.4.
+*   **JPEG Decoder:** `esp_new_jpeg` for hardware-accelerated decompression.
 
-## 5. Background Loading (Pop-in Effect)
-**Strategy:** Move the actual `lv_image_set_src` calls or the underlying file reading to a lower-priority FreeRTOS task.
-- **Benefit:** The UI remains at high FPS while tiles "pop in" as they are decoded.
-- **Challenge:** Requires careful synchronization of LVGL objects across tasks using the `lvgl_mux` mutex.
+## 📁 SD Card Structure
 
-## 6. Optimized Storage Format
-**Long-term Idea:** Replace thousands of small files with a single large archive or binary blob (like MBTiles/SQLite).
-- **Benefit:** Significantly reduces FatFS overhead and eliminates the need for directory traversal.
+Tiles should be stored on a FAT32-formatted SD card in the following directory structure:
 
-## 7. Multi-core Decoding (ESP32-S3 Dual Core)
-**Idea:** Offload JPEG/PNG decoding from the main UI core (Core 0) to Core 1.
-- **Implementation:** Currently, LVGL decoding is synchronous within `lv_timer_handler`. Using a custom decoder that pushes jobs to a Core 1 worker thread can significantly increase tile throughput without dropping UI frames.
+```text
+/sdcard/tiles-jpg/
+└── {zoom}/
+    └── {x}/
+        └── {y}.jpg
+```
 
-## 8. Tile Pre-fetching
-**Strategy:** Predict the user's movement and load tiles just outside the current 5x4 grid.
-- **Benefit:** When the user scrolls, tiles are already decoded and cached in PSRAM, leading to an instantaneous appearance.
-- **Challenge:** Requires management of a larger "invisible" tile grid and careful memory/cache eviction policies.
+*   **Zoom levels:** 1 to 18 (automatically detected from directory structure).
+*   **Tile size:** 256x256 pixels.
+*   **Format:** JPEG (Standard or Progressive).
 
----
+## 🔨 Setup & Build
 
-*Status: Investigation document complete. Ready for implementation phase.*
+1.  **Environment:** Ensure you have ESP-IDF v6.1 installed and configured.
+2.  **Clone:** Clone this repository with its submodules.
+3.  **Configure:** The project uses `sdkconfig.defaults` for optimal PSRAM and LVGL settings.
+4.  **Build & Flash:**
+    ```bash
+    idf.py build
+    idf.py -p {YOUR_PORT} flash monitor
+    ```
+
+## 🧠 Technical Implementation Details
+
+### CH422G Complexity
+The ESP32-S3-Touch-LCD-5 uses nearly all GPIOs for the 16-bit RGB interface. Most peripheral control lines (LCD Reset, TP Reset, SD CS) are managed via a **CH422G I/O Expander** on the I2C bus. This requires a specialized driver to toggle these pins before initializing the display or mounting the SD card.
+
+### Multi-touch Logic
+The `TileEngine` uses the multi-touch data from the GT911 to calculate the distance between two points during a "pressing" event, triggering a zoom level change when the pinch distance exceeds a threshold.
+
+### Optimized JPEG Decoding
+Standard LVGL decoders can be slow on microcontrollers. This project implements a custom LVGL image decoder that uses the ESP32-S3's vector instructions. Compressed JPEG data is read into internal RAM (when possible) for maximum throughput before being decoded into PSRAM.
+
+## 📈 Performance & Future Roadmap
+
+Current measurements show `TileEngine::updateTiles` takes ~280ms for logic and source updates. Visual latency is primarily bound by SD card read speed and decoding time.
+
+**Planned Improvements:**
+- [ ] **Asynchronous Loading:** Move tile decoding to a background task to prevent UI stutter during rapid scrolling.
+- [ ] **MBTiles Support:** Implement a single-file storage format to reduce FATFS overhead and file-open latency.
+- [ ] **Pre-fetching:** Load adjacent tiles into cache before they enter the viewport.
+- [ ] **Vector Tiles:** Future support for MVT (Mapbox Vector Tiles) for smaller storage footprint and infinite zoom levels.
