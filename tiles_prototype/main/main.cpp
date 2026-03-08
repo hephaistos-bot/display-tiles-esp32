@@ -197,7 +197,7 @@ void hardware_init(void) {
     probe_io_conf.control_phase_bytes = 1;
     probe_io_conf.lcd_cmd_bits = 16;
     probe_io_conf.flags.disable_control_phase = 1;
-    probe_io_conf.scl_speed_hz = 100000;
+    probe_io_conf.scl_speed_hz = 400000;
 
     esp_lcd_panel_io_handle_t probe_io = NULL;
 
@@ -225,7 +225,7 @@ void hardware_init(void) {
     ESP_LOGI(TAG, "Initializing GT911 driver at 0x%02X...", tp_addr);
     esp_lcd_panel_io_i2c_config_t tp_io_config = {};
     tp_io_config.dev_addr = tp_addr;
-    tp_io_config.scl_speed_hz = 100000;
+    tp_io_config.scl_speed_hz = 400000;
     tp_io_config.control_phase_bytes = 1;
     tp_io_config.lcd_cmd_bits = 16;
     tp_io_config.flags.disable_control_phase = 1;
@@ -410,23 +410,19 @@ void lvgl_init_task(void *arg) {
     // Resize image cache (4MB in PSRAM)
     lv_image_cache_resize(4 * 1024 * 1024, false);
 
-    // Use small buffers to make the progressive rendering latency visible
-    uint32_t buffer_size = LCD_H_RES * 20; 
-    lv_color_t *buf1 = (lv_color_t *)heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    lv_color_t *buf2 = (lv_color_t *)heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    // Use full framebuffers in PSRAM for smooth double-buffering
+    uint32_t buffer_size = LCD_H_RES * LCD_V_RES; 
+    lv_color_t *buf1 = (lv_color_t *)heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    lv_color_t *buf2 = (lv_color_t *)heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 
-    if (!buf1) {
-        ESP_LOGE(TAG, "Failed to allocate LVGL draw buffer buf1");
-        abort();
-    }
-    if (!buf2) {
-        ESP_LOGE(TAG, "Failed to allocate LVGL draw buffers in internal SRAM buf2");
+    if (!buf1 || !buf2) {
+        ESP_LOGE(TAG, "Failed to allocate LVGL draw buffers in PSRAM");
         abort();
     }
     
     // Initialize LVGL Display
     lv_display_t *disp = lv_display_create(LCD_H_RES, LCD_V_RES);
-    lv_display_set_buffers(disp, buf1, buf2, buffer_size * sizeof(lv_color_t), LV_DISPLAY_RENDER_MODE_PARTIAL);
+    lv_display_set_buffers(disp, buf1, buf2, buffer_size * sizeof(lv_color_t), LV_DISPLAY_RENDER_MODE_FULL);
     lv_display_set_flush_cb(disp, lvgl_flush_cb);
 
     // Register Touch Input Device
@@ -441,11 +437,7 @@ void lvgl_init_task(void *arg) {
     static TileEngine engine;
     engine.init();
 
-#if TILE_DEBUG
-    engine.debug(/*lat=*/-25.0, /*lon=*/25.0, /*zoom=*/8);
-#endif
-
-    engine.setMapCenter(/*lat=*/-25.0, /*lon=*/25.0, /*zoom=*/8);
+    engine.setMapCenter(/*lat=*/0.0, /*lon=*/0.0, /*zoom=*/8);
 
     ESP_LOGI(TAG, "LVGL initialization complete. Entering main loop...");
 
