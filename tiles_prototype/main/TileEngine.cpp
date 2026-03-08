@@ -13,7 +13,7 @@
 #define JPEG_FORMAT   1
 #define PNG_FORMAT    2
 #define RGB565_FORMAT 3
-#define TILE_FORMAT RGB565_FORMAT
+#define TILE_FORMAT JPEG_FORMAT
 
 #if TILE_FORMAT == JPEG_FORMAT
 #define TILE_EXTENTION "jpg"
@@ -27,6 +27,11 @@
 #endif
 
 static const char* TAG = "TileEngine";
+
+extern "C" {
+    extern volatile int64_t update_start_time;
+    extern volatile bool measure_next_flush;
+}
 
 void list_sd_card_contents(const char *main_dir) {
     lv_fs_dir_t dir;
@@ -83,8 +88,16 @@ static lv_result_t rgb565_decoder_info(lv_image_decoder_t * decoder, lv_image_de
 
 static lv_result_t rgb565_decoder_open(lv_image_decoder_t * decoder, lv_image_decoder_dsc_t * dsc) {
     if(dsc->src_type == LV_IMAGE_SRC_FILE) {
-        const char * path = (const char *)dsc->src;
-        if(strstr(path, ".rgb565") != NULL) {
+        const char * lv_path = (const char *)dsc->src;
+        if(strstr(lv_path, ".rgb565") != NULL) {
+            // Convert LVGL path (S:/...) to POSIX path (/sdcard/...)
+            char posix_path[128];
+            if (lv_path[0] == 'S' && lv_path[1] == ':') {
+                snprintf(posix_path, sizeof(posix_path), "/sdcard%s", lv_path + 2);
+            } else {
+                return LV_RESULT_INVALID;
+            }
+
             uint32_t w = 256;
             uint32_t h = 256;
             uint32_t stride = w * 2;
@@ -93,7 +106,8 @@ static lv_result_t rgb565_decoder_open(lv_image_decoder_t * decoder, lv_image_de
             lv_draw_buf_t * draw_buf = (lv_draw_buf_t *)lv_malloc(sizeof(lv_draw_buf_t));
             if(!draw_buf) return LV_RESULT_INVALID;
 
-            void * data = heap_caps_malloc(data_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            // Use 64-byte alignment for PSRAM access efficiency
+            void * data = heap_caps_aligned_alloc(64, data_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
             if(!data) {
                 lv_free(draw_buf);
                 return LV_RESULT_INVALID;
@@ -101,26 +115,30 @@ static lv_result_t rgb565_decoder_open(lv_image_decoder_t * decoder, lv_image_de
 
             lv_draw_buf_init(draw_buf, w, h, LV_COLOR_FORMAT_RGB565, stride, data, data_size);
 
-            lv_fs_file_t f;
-            if(lv_fs_open(&f, path, LV_FS_MODE_RD) != LV_FS_RES_OK) {
+            FILE* f = fopen(posix_path, "rb");
+            if(!f) {
                 heap_caps_free(data);
                 lv_free(draw_buf);
                 return LV_RESULT_INVALID;
             }
 
-            uint32_t file_size;
-            lv_fs_seek(&f, 0, LV_FS_SEEK_END);
-            lv_fs_tell(&f, &file_size);
+            fseek(f, 0, SEEK_END);
+            long file_size = ftell(f);
 
-            if (file_size > data_size) {
-                lv_fs_seek(&f, file_size - data_size, LV_FS_SEEK_SET);
+            if (file_size > (long)data_size) {
+                fseek(f, file_size - data_size, SEEK_SET);
             } else {
-                lv_fs_seek(&f, 0, LV_FS_SEEK_SET);
+                fseek(f, 0, SEEK_SET);
             }
 
-            uint32_t br;
-            lv_fs_read(&f, draw_buf->data, data_size, &br);
-            lv_fs_close(&f);
+            size_t br = fread(draw_buf->data, 1, data_size, f);
+            fclose(f);
+
+            if (br != data_size) {
+                heap_caps_free(data);
+                lv_free(draw_buf);
+                return LV_RESULT_INVALID;
+            }
 
             dsc->decoded = draw_buf;
             return LV_RESULT_OK;
@@ -193,6 +211,8 @@ void TileEngine::getTilePath(char* buf, size_t buf_size, int zoom, int x, int y,
 }
 
 void TileEngine::updateTiles(double lat, double lon, int zoom) {
+    update_start_time = esp_timer_get_time();
+    measure_next_flush = true;
     ESP_LOGI(TAG, "updateTiles: lat=%f, lon=%f, zoom=%d", lat, lon, zoom);
     int64_t start_time = esp_timer_get_time();
     double tile_x, tile_y;

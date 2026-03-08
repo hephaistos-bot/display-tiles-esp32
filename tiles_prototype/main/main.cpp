@@ -11,6 +11,7 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "lvgl.h"
+#include "misc/cache/instance/lv_image_cache.h"
 #include "CH422GController.hpp"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
@@ -62,6 +63,12 @@ esp_lcd_panel_handle_t lcd_panel = NULL;
 esp_lcd_touch_handle_t tp_handle = NULL;
 SemaphoreHandle_t lvgl_mux = NULL;
 sdmmc_card_t *card = NULL;
+
+// Timing measurement
+extern "C" {
+    volatile int64_t update_start_time = 0;
+    volatile bool measure_next_flush = false;
+}
 
 void hardware_init(void);
 esp_err_t init_sd_card(void);
@@ -317,6 +324,12 @@ esp_err_t init_sd_card(void) {
 void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
     esp_lcd_panel_draw_bitmap(lcd_panel, area->x1, area->y1, area->x2 + 1, area->y2 + 1, px_map);
     lv_display_flush_ready(disp);
+
+    if (measure_next_flush && lv_display_flush_is_last(disp)) {
+        int64_t end_time = esp_timer_get_time();
+        ESP_LOGI("TIMING", "TOTAL SCREEN UPDATE TIME: %lld us", (end_time - update_start_time));
+        measure_next_flush = false;
+    }
 }
 
 // LVGL Tick Callback
@@ -394,20 +407,23 @@ void lvgl_init_task(void *arg) {
     lv_init();
     lv_tick_set_cb(lvgl_tick_cb);
 
-    // Allocate draw buffers in internal SRAM for performance
-    uint32_t buffer_size = LCD_H_RES * 40;
+    // Resize image cache (4MB in PSRAM)
+    lv_image_cache_resize(4 * 1024 * 1024, false);
+
+    // Use small buffers to make the progressive rendering latency visible
+    uint32_t buffer_size = LCD_H_RES * 20; 
     lv_color_t *buf1 = (lv_color_t *)heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     lv_color_t *buf2 = (lv_color_t *)heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
 
     if (!buf1) {
-        ESP_LOGE(TAG, "Failed to allocate LVGL draw buffers in internal SRAM buf1");
+        ESP_LOGE(TAG, "Failed to allocate LVGL draw buffer buf1");
         abort();
     }
     if (!buf2) {
         ESP_LOGE(TAG, "Failed to allocate LVGL draw buffers in internal SRAM buf2");
         abort();
     }
-
+    
     // Initialize LVGL Display
     lv_display_t *disp = lv_display_create(LCD_H_RES, LCD_V_RES);
     lv_display_set_buffers(disp, buf1, buf2, buffer_size * sizeof(lv_color_t), LV_DISPLAY_RENDER_MODE_PARTIAL);

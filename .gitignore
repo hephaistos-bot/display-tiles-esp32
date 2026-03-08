@@ -57,3 +57,6 @@ venv.bak/
 *.swp
 *~
 tiles_prototype/monitor.log
+tiles-rgb565
+tiles-jpg
+tiles-png
