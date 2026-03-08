@@ -98,7 +98,7 @@ private:
     i2c_master_dev_handle_t m_dev_io     = nullptr;
     i2c_master_dev_handle_t m_dev_oc     = nullptr;
 
-    uint8_t m_cfg_cache = BIT_CFG_IO_OE | BIT_CFG_OC_EN; // Initial config: IO_OE=1, OC_EN=1
+    uint8_t m_cfg_cache = BIT_CFG_IO_OE; // Initial config: IO_OE=1
     uint8_t m_io_cache  = BIT_IO_TP_RST | BIT_IO_LCD_RST | BIT_IO_SD_CS; // TP_RST=H, LCD_BL=L, LCD_RST=H, SD_CS=H
     uint8_t m_oc_cache  = 0x00;
 
