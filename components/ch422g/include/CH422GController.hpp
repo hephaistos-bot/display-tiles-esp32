@@ -19,6 +19,7 @@
  */
 class CH422GController {
 public:
+    static constexpr uint8_t DEFAULT_ADDR_OC     = 0x23; // WR_OC
     static constexpr uint8_t DEFAULT_ADDR_CONFIG = 0x24; // WR_SET
     static constexpr uint8_t DEFAULT_ADDR_RD_IO  = 0x26; // RD_IO
     static constexpr uint8_t DEFAULT_ADDR_IO     = 0x38; // WR_IO
@@ -36,7 +37,8 @@ public:
     CH422GController(i2c_master_bus_handle_t bus_handle,
                      uint8_t addr_config = DEFAULT_ADDR_CONFIG,
                      uint8_t addr_rd_io  = DEFAULT_ADDR_RD_IO,
-                     uint8_t addr_io     = DEFAULT_ADDR_IO);
+                     uint8_t addr_io     = DEFAULT_ADDR_IO,
+                     uint8_t addr_oc     = DEFAULT_ADDR_OC);
 
     ~CH422GController();
 
@@ -52,6 +54,8 @@ public:
     esp_err_t setTouchReset(bool active);
     esp_err_t setBacklight(bool active);
     esp_err_t setSDCardSelected(bool selected);
+    esp_err_t setD0(bool level);
+    esp_err_t setD1(bool level);
 
     // --- Getters (State Reads) ---
     esp_err_t getLCDReset(bool *active);
@@ -64,6 +68,7 @@ private:
     static constexpr uint8_t BIT_CFG_SLEEP    = (1 << 7);
     static constexpr uint8_t BIT_CFG_OD_EN    = (1 << 4);
     static constexpr uint8_t BIT_CFG_A_SCAN   = (1 << 2);
+    static constexpr uint8_t BIT_CFG_OC_EN    = (1 << 1);
     static constexpr uint8_t BIT_CFG_IO_OE    = (1 << 0);
 
     // IO Register (8-bit at 0x38)
@@ -72,19 +77,27 @@ private:
     static constexpr uint8_t BIT_IO_LCD_RST   = (1 << 3);
     static constexpr uint8_t BIT_IO_SD_CS     = (1 << 4);
 
+    // OC Register bits (4-bit at 0x23)
+    static constexpr uint8_t BIT_OC_DO0       = (1 << 0);
+    static constexpr uint8_t BIT_OC_DO1       = (1 << 1);
+
     i2c_master_bus_handle_t m_bus_handle;
     uint8_t m_addr_config;
     uint8_t m_addr_rd_io;
     uint8_t m_addr_io;
+    uint8_t m_addr_oc;
 
     i2c_master_dev_handle_t m_dev_config = nullptr;
     i2c_master_dev_handle_t m_dev_rd_io  = nullptr;
     i2c_master_dev_handle_t m_dev_io     = nullptr;
+    i2c_master_dev_handle_t m_dev_oc     = nullptr;
 
-    uint8_t m_cfg_cache = BIT_CFG_IO_OE; // Initial config: IO_OE=1, others=0
+    uint8_t m_cfg_cache = BIT_CFG_IO_OE | BIT_CFG_OC_EN; // Initial config: IO_OE=1, OC_EN=1
     uint8_t m_io_cache  = BIT_IO_TP_RST | BIT_IO_LCD_RST | BIT_IO_SD_CS; // TP_RST=H, LCD_BL=L, LCD_RST=H, SD_CS=H
+    uint8_t m_oc_cache  = 0x00;
 
     esp_err_t writeConfig(uint8_t val);
     esp_err_t writeIO(uint8_t val);
+    esp_err_t writeOC(uint8_t val);
     esp_err_t readIO(uint8_t *val);
 };
