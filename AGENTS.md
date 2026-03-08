@@ -49,10 +49,10 @@ Used for critical system and display signals.
 
 | Bit | Pin | Function | Requirement |
 |---|---|---|---|
-| 0 | OC0 | TP_RST | Touch Reset. Pulse LOW then HIGH to wake GT911. |
-| 1 | OC1 | DISP | Backlight/Disp EN. Set HIGH to enable screen backlight. |
-| 2 | OC2 | LCD_RST | LCD Reset. Pulse LOW then HIGH to initialize RGB panel. |
-| 3 | OC3 | SD_CS | SD Chip Select. Pull LOW for SD operations; HIGH to release. |
+| 1 | IO1 | TP_RST | Touch Reset. Pulse LOW then HIGH to wake GT911. |
+| 2 | IO2 | LCD_BL | Backlight. Set HIGH to enable screen backlight. |
+| 3 | IO3 | LCD_RST | LCD Reset. Pulse LOW then HIGH to initialize RGB panel. |
+| 4 | IO4 | SD_CS | SD Chip Select. Pull LOW for SD operations; HIGH to release. |
 
 ### EXIO Register (Address 0x27) - Bidirectional
 Used for isolated digital I/O.
@@ -74,17 +74,17 @@ The board features optically isolated inputs and open-drain outputs accessible v
   * **Software Control:** Controlled via I2C address **0x27**. Writing a `1` to the corresponding bit enables the output (sinks current to GND).
 
 ### Screen Backlight
-* **Control Type:** Binary (ON/OFF) via CH422G OC1.
+* **Control Type:** Binary (ON/OFF) via CH422G IO2.
 
 ### Touch Screen (GT911)
 * **Interrupt (IRQ):** GPIO 4.
-* **Implementation:** Use the `esp_lcd_touch` component. Ensure you initialize the CH422G and pull OC0 (TP_RST) high before attempting to probe the touch IC.
+* **Implementation:** Use the `esp_lcd_touch` component. Ensure you initialize the CH422G and pull IO1 (TP_RST) high before attempting to probe the touch IC.
 
 ### SD Card Mounting
 For IDF 6.1, use the `sdspi_host` driver:
 1. Initialize SPI bus on GPIO 11, 12, 13.
 2. **Wake-up Sequence:** Send 100 dummy clocks on SCK with CS High before mounting.
-3. Command CH422G to pull OC3 (SD_CS) LOW.
+3. Command CH422G to pull IO4 (SD_CS) LOW.
 4. Call `esp_vfs_fat_sdspi_mount()`.
 
 ### Optimized JPEG Decoding
@@ -94,4 +94,4 @@ The ESP32-S3 supports hardware-accelerated JPEG decoding via SIMD instructions. 
 
 * **Memory:** Always allocate LVGL frame buffers and large image buffers in PSRAM using `MALLOC_CAP_SPIRAM`.
 * **I2C Conflicts:** SDA/SCL are on GPIO 8/9. Avoid using these for RGB data.
-* **CH422G Communication:** The chip requires the system configuration command (address `0x24`) to be sent once with value `0x05` to enable IO and OC operations.
+* **CH422G Communication:** The chip requires the system configuration command (address `0x24`) to be sent once with value `0x01` to enable IO operations.
