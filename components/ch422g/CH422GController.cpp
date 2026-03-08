@@ -60,15 +60,15 @@ esp_err_t CH422GController::setSleepMode(bool sleep) {
     return writeConfig(m_cfg_cache);
 }
 
-esp_err_t CH422GController::setOpenDrain(bool enable) {
-    if (enable) m_cfg_cache |= BIT_CFG_OD_EN;
-    else        m_cfg_cache &= ~BIT_CFG_OD_EN;
+esp_err_t CH422GController::setOpenDrain(IOMode mode) {
+    if (mode == IOMode::OpenDrain) m_cfg_cache |= BIT_CFG_OD_EN;
+    else                          m_cfg_cache &= ~BIT_CFG_OD_EN;
     return writeConfig(m_cfg_cache);
 }
 
-esp_err_t CH422GController::setIOOutputEnable(bool enable) {
-    if (enable) m_cfg_cache |= BIT_CFG_IO_OE;
-    else        m_cfg_cache &= ~BIT_CFG_IO_OE;
+esp_err_t CH422GController::setIOOutputEnable(IODirection direction) {
+    if (direction == IODirection::Output) m_cfg_cache |= BIT_CFG_IO_OE;
+    else                                  m_cfg_cache &= ~BIT_CFG_IO_OE;
     return writeConfig(m_cfg_cache);
 }
 

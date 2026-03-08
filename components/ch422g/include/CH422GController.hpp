@@ -23,6 +23,16 @@ public:
     static constexpr uint8_t DEFAULT_ADDR_RD_IO  = 0x26; // RD_IO
     static constexpr uint8_t DEFAULT_ADDR_IO     = 0x38; // WR_IO
 
+    enum class IODirection {
+        Input,
+        Output
+    };
+
+    enum class IOMode {
+        PushPull,
+        OpenDrain
+    };
+
     CH422GController(i2c_master_bus_handle_t bus_handle,
                      uint8_t addr_config = DEFAULT_ADDR_CONFIG,
                      uint8_t addr_rd_io  = DEFAULT_ADDR_RD_IO,
@@ -34,8 +44,8 @@ public:
 
     // --- Configuration ---
     esp_err_t setSleepMode(bool sleep);
-    esp_err_t setOpenDrain(bool enable);
-    esp_err_t setIOOutputEnable(bool enable);
+    esp_err_t setOpenDrain(IOMode mode);
+    esp_err_t setIOOutputEnable(IODirection direction);
 
     // --- Setters (Output Pins) ---
     esp_err_t setLCDReset(bool active);
