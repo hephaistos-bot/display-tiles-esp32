@@ -43,15 +43,33 @@ esp_err_t CH422GController::init() {
         if (ret != ESP_OK) return ret;
     }
 
-    // 1. Configure CH422G to output mode
-    uint8_t config = 0x01;
-    ret = i2c_master_transmit(m_dev_config, &config, 1, 100);
+    // 1. Configure CH422G (default: IO block enabled)
+    ret = writeConfig(m_cfg_cache);
     if (ret != ESP_OK) return ret;
     vTaskDelay(pdMS_TO_TICKS(10));
 
     // 2. Initial state: Backlight OFF (0x1A)
-    m_io_cache = 0x1A;
     return writeIO(m_io_cache);
+}
+
+// --- Configuration ---
+
+esp_err_t CH422GController::setSleepMode(bool sleep) {
+    if (sleep) m_cfg_cache |= BIT_CFG_SLEEP;
+    else       m_cfg_cache &= ~BIT_CFG_SLEEP;
+    return writeConfig(m_cfg_cache);
+}
+
+esp_err_t CH422GController::setOpenDrain(bool enable) {
+    if (enable) m_cfg_cache |= BIT_CFG_OD_EN;
+    else        m_cfg_cache &= ~BIT_CFG_OD_EN;
+    return writeConfig(m_cfg_cache);
+}
+
+esp_err_t CH422GController::setIOOutputEnable(bool enable) {
+    if (enable) m_cfg_cache |= BIT_CFG_IO_OE;
+    else        m_cfg_cache &= ~BIT_CFG_IO_OE;
+    return writeConfig(m_cfg_cache);
 }
 
 // --- Setters (Output Pins) ---
@@ -107,6 +125,11 @@ esp_err_t CH422GController::getSDCardSelected(bool *selected) {
 }
 
 // --- Private Helpers ---
+
+esp_err_t CH422GController::writeConfig(uint8_t val) {
+    if (!m_dev_config) return ESP_ERR_INVALID_STATE;
+    return i2c_master_transmit(m_dev_config, &val, 1, 100);
+}
 
 esp_err_t CH422GController::writeIO(uint8_t val) {
     if (!m_dev_io) return ESP_ERR_INVALID_STATE;
