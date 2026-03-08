@@ -18,13 +18,14 @@ This project implements a high-performance map tile engine for the **Waveshare E
 *   **Display:** 5-inch 800x480 RGB LCD (16-bit color).
 *   **Controller:** ESP32-S3 (with Octal PSRAM).
 *   **Touch:** GT911 Capacitive Touch Controller (I2C).
-*   **I/O Expander:** CH422G (used for LCD reset, touch reset, backlight, and SD CS).
+*   **I/O Expander:** CH422G (managed via the `CH422GController` component for LCD reset, touch reset, backlight, and SD CS).
 *   **Storage:** microSD card slot connected via SPI.
 
 ## 📂 Software Stack
 
 *   **Framework:** ESP-IDF v6.1 (using the new `i2c_master` and `spi_master` drivers).
 *   **UI Library:** LVGL v9.4.
+*   **I/O Control:** Custom `CH422GController` C++ component.
 *   **JPEG Decoder:** `esp_new_jpeg` for hardware-accelerated decompression.
 
 ## 📁 SD Card Structure

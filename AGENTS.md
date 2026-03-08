@@ -17,19 +17,19 @@ The ESP32-S3's 16-bit RGB interface consumes nearly all available GPIOs. To mana
   * *Note:* While the CH422G supports 1 MHz, the GT911 and PCF85063 RTC are rated for 400 kHz. Running the bus at 400 kHz ensures stability across all shared devices.
 * **Component Addresses:**
   * **CH422G (IO Expander):**
-    * `0x24`: System Configuration (Read/Write)
-    * `0x26`: Read EXIO Status (Special Read Address)
-    * `0x27`: EXIO Byte-Write (Bidirectional I/O)
-    * `0x38`: OC (Open-Collector) Byte-Write (Output-only)
+    * `0x24`: System Configuration (WR_SET)
+    * `0x26`: Read IO Port Status (RD_IO)
+    * `0x38`: IO Port Byte-Write (WR_IO) - Bidirectional I/O
+    * `0x23`: OC (Open-Collector) Byte-Write (WR_OC) - Output-only
   * **GT911 (Touch Controller):** 0x5D (Default) or 0x14
   * **PCF85063 (RTC):** 0x51
 
 ### SPI Bus (SD Card)
 * **Interface Type:** SPI Mode (not SDMMC).
 * **Pins:** MOSI: GPIO 11 | SCK: GPIO 12 | MISO: GPIO 13
-* **Chip Select (CS):** Managed by CH422G OC3 (Active Low).
+* **Chip Select (CS):** Managed by CH422G IO4 (Active Low).
 * **Expected Speed:** 40 MHz.
-  * *Note:* In ESP-IDF, initialize the bus with `spi_bus_initialize`. Since CS is not a real GPIO, set the `spics_io_num` to -1 and manually toggle the CH422G OC3 bit before/after SPI transactions.
+  * *Note:* In ESP-IDF, initialize the bus with `spi_bus_initialize`. Since CS is not a real GPIO, set the `spics_io_num` to -1 and manually toggle the CH422G IO4 bit before/after SPI transactions.
 
 ### RGB Interface (Display)
 * **PCLK (Clock):** GPIO 7.
@@ -42,36 +42,36 @@ The ESP32-S3's 16-bit RGB interface consumes nearly all available GPIOs. To mana
 
 ## 3. Peripheral Control via CH422G
 
-The CH422G manages the board's "housekeeping" signals. You must implement an I2C driver for this chip to enable other hardware.
+The CH422G manages the board's "housekeeping" signals. The `CH422GController` component provides a clean C++ interface for these operations.
 
-### OC Register (Address 0x38) - Output Only
-Used for critical system and display signals.
-
-| Bit | Pin | Function | Requirement |
-|---|---|---|---|
-| 1 | IO1 | TP_RST | Touch Reset. Pulse LOW then HIGH to wake GT911. |
-| 2 | IO2 | LCD_BL | Backlight. Set HIGH to enable screen backlight. |
-| 3 | IO3 | LCD_RST | LCD Reset. Pulse LOW then HIGH to initialize RGB panel. |
-| 4 | IO4 | SD_CS | SD Chip Select. Pull LOW for SD operations; HIGH to release. |
-
-### EXIO Register (Address 0x27) - Bidirectional
-Used for isolated digital I/O.
+### IO Port Register (Address 0x38) - Bidirectional
+Used for critical system signals and digital inputs.
 
 | Bit | Pin | Function | Requirement |
 |---|---|---|---|
 | 0 | IO0 | DI0 | Digital Input 0. |
+| 1 | IO1 | TP_RST | Touch Reset. Pulse LOW then HIGH to wake GT911. |
+| 2 | IO2 | LCD_BL | Backlight. Set HIGH to enable screen backlight. |
+| 3 | IO3 | LCD_RST | LCD Reset. Pulse LOW then HIGH to initialize RGB panel. |
+| 4 | IO4 | SD_CS | SD Chip Select. Pull LOW for SD operations; HIGH to release. |
 | 5 | IO5 | DI1 | Digital Input 1. |
-| 6 | IO6 | DO0 | Digital Output 0 (Isolated). |
-| 7 | IO7 | DO1 | Digital Output 1 (Isolated). |
+
+### OC Register (Address 0x23) - Output Only
+Used for isolated digital outputs.
+
+| Bit | Pin | Function | Requirement |
+|---|---|---|---|
+| 0 | DO0 | DO0 | Digital Output 0 (Isolated). |
+| 1 | DO1 | DO1 | Digital Output 1 (Isolated). |
 
 ## 4. Hardware Implementation Guide
 
 ### Isolated I/O (DI / DO)
 The board features optically isolated inputs and open-drain outputs accessible via the terminal block.
 
-* **Digital Inputs (DI0, DI1):** Mapped to **IO0** and **IO5** of the EXIO register. These support 5V–36V signals.
-* **Digital Outputs (DO0, DO1):** Mapped to **IO6** and **IO7** of the EXIO register.
-  * **Software Control:** Controlled via I2C address **0x27**. Writing a `1` to the corresponding bit enables the output (sinks current to GND).
+* **Digital Inputs (DI0, DI1):** Mapped to **IO0** and **IO5** of the IO Port register (**0x38**). These support 5V–36V signals.
+* **Digital Outputs (DO0, DO1):** Mapped to **DO0** and **DO1** of the OC register (**0x23**).
+  * **Software Control:** Controlled via I2C address **0x23**. Writing a `1` to the corresponding bit enables the output (sinks current to GND).
 
 ### Screen Backlight
 * **Control Type:** Binary (ON/OFF) via CH422G IO2.
