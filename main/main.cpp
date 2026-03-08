@@ -452,7 +452,7 @@ void lvgl_init_task(void *arg) {
     static TileEngine engine;
     engine.init();
 
-    engine.setMapCenter(/*lat=*/0.0, /*lon=*/0.0, /*zoom=*/8);
+    engine.setMapCenter(/*lat=*/-25.0, /*lon=*/25.0, /*zoom=*/8);
 
     ESP_LOGI(TAG, "LVGL initialization complete. Entering main loop...");
 
