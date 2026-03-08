@@ -6,17 +6,16 @@
 /**
  * @brief CH422G I/O Expander Controller class for Waveshare ESP32-S3-Touch-LCD-5.
  *
- * This class provides explicit control over the pins managed by the CH422G chip.
- * It maintains an internal cache of output states to prevent accidental modification
- * of neighboring pins.
+ * Mapping Summary (based on hardware investigation):
+ *   - OC (0x38): TP_RST (0), DISP/BL (1), LCD_RST (2), SD_CS (3)
+ *   - EXIO (0x27): DI0 (0), DI1 (5), DO0 (6), DO1 (7)
  *
- * NOTE: This class is NOT thread-safe. Caller must ensure synchronized access
- * if used from multiple tasks.
+ * NOTE: This class is NOT thread-safe.
  */
 class CH422GController {
 public:
     static constexpr uint8_t DEFAULT_ADDR_CONFIG = 0x24;
-    static constexpr uint8_t DEFAULT_ADDR_RD_IO  = 0x26; // Ajout de l'adresse de lecture spécifique
+    static constexpr uint8_t DEFAULT_ADDR_RD_IO  = 0x26;
     static constexpr uint8_t DEFAULT_ADDR_EXIO   = 0x27;
     static constexpr uint8_t DEFAULT_ADDR_OC     = 0x38;
 
@@ -29,9 +28,6 @@ public:
     ~CH422GController();
 
     esp_err_t init();
-
-    void setEXIOInitialState(uint8_t val) { m_exio_cache = val; }
-    void setOCInitialState(uint8_t val) { m_oc_cache = val; }
 
     // --- Setters (Output Pins) ---
     esp_err_t setLCDReset(bool active);
@@ -51,6 +47,9 @@ public:
     esp_err_t getDigitalOutput0(bool *active);
     esp_err_t getDigitalOutput1(bool *active);
 
+    void setEXIOInitialState(uint8_t val) { m_exio_cache = val; }
+    void setOCInitialState(uint8_t val) { m_oc_cache = val; }
+
 private:
     i2c_master_bus_handle_t m_bus_handle;
     uint8_t m_addr_config;
@@ -66,18 +65,19 @@ private:
     uint8_t m_exio_cache = 0;
     uint8_t m_oc_cache   = 0;
 
-    static constexpr uint8_t BIT_EXIO_DI0     = (1 << 0);
-    static constexpr uint8_t BIT_EXIO_TP_RST  = (1 << 1);
-    static constexpr uint8_t BIT_EXIO_DISP    = (1 << 2);
-    static constexpr uint8_t BIT_EXIO_LCD_RST = (1 << 3);
-    static constexpr uint8_t BIT_EXIO_SD_CS   = (1 << 4);
-    static constexpr uint8_t BIT_EXIO_DI1     = (1 << 5);
+    // OC Register (4-bit output-only at 0x38)
+    static constexpr uint8_t BIT_OC_TP_RST    = (1 << 0); // OC0
+    static constexpr uint8_t BIT_OC_DISP      = (1 << 1); // OC1 (LCD_BL)
+    static constexpr uint8_t BIT_OC_LCD_RST   = (1 << 2); // OC2
+    static constexpr uint8_t BIT_OC_SD_CS     = (1 << 3); // OC3
 
-    static constexpr uint8_t BIT_OC_DO0       = (1 << 0);
-    static constexpr uint8_t BIT_OC_DO1       = (1 << 1);
+    // EXIO Register (8-bit bidirectional at 0x27)
+    static constexpr uint8_t BIT_EXIO_DI0     = (1 << 0); // IO0
+    static constexpr uint8_t BIT_EXIO_DI1     = (1 << 5); // IO5
+    static constexpr uint8_t BIT_EXIO_DO0     = (1 << 6); // IO6
+    static constexpr uint8_t BIT_EXIO_DO1     = (1 << 7); // IO7
 
     esp_err_t writeEXIO(uint8_t val);
     esp_err_t writeOC(uint8_t val);
     esp_err_t readEXIO(uint8_t *val);
-    // Supprimé : readOC() n'existe pas matériellement
 };

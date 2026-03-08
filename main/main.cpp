@@ -118,9 +118,7 @@ void hardware_init(void) {
     ch422g_controller = new CH422GController(i2c_bus);
     ESP_ERROR_CHECK(ch422g_controller->init());
 
-    // Set known safe state: Backlight ON, Resets Released, SD CS De-selected
-    // (TP_RST=1, DISP=1, LCD_RST=1, SD_CS=1 -> 0x1E)
-    ch422g_controller->setEXIOInitialState(0x1E);
+    // Set known safe state: Backlight ON
     ESP_ERROR_CHECK(ch422g_controller->setBacklight(true));
 
     // --- GT911 Reset Sequence for Address 0x5D ---
@@ -265,9 +263,9 @@ esp_err_t init_sd_card(void) {
     mount_config.format_if_mount_failed = false;
     mount_config.max_files = 5;
     mount_config.allocation_unit_size = 16 * 1024;
-    
+
     // 1. S'assurer que le CS est HAUT (Désélectionné)
-    ch422g_controller->setSDCardSelected(false); 
+    ch422g_controller->setSDCardSelected(false);
     vTaskDelay(pdMS_TO_TICKS(50));
 
     // 2. Générer des pulses d'horloge manuels (Dummy Clocks)
@@ -311,12 +309,12 @@ esp_err_t init_sd_card(void) {
     vTaskDelay(pdMS_TO_TICKS(100)); // On laisse la tension se stabiliser
 
     ret = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_config, &mount_config, &card);
-    
+
     // Si ça échoue, on relâche le CS
     if (ret != ESP_OK) {
         ch422g_controller->setSDCardSelected(false);
     }
-    
+
     return ret;
 }
 
@@ -360,7 +358,7 @@ static void lvgl_touch_read_cb(lv_indev_t * indev, lv_indev_data_t * data) {
             user_data->count = point_cnt;
             user_data->points[0].x = pts[0].x;
             user_data->points[0].y = pts[0].y;
-            
+
             data->point.x = pts[0].x;
             data->point.y = pts[0].y;
             data->state = LV_INDEV_STATE_PRESSED;
@@ -422,7 +420,7 @@ void lvgl_init_task(void *arg) {
     lv_image_cache_resize(4 * 1024 * 1024, false);
 
     // Use full framebuffers in PSRAM for smooth double-buffering
-    uint32_t buffer_size = LCD_H_RES * LCD_V_RES; 
+    uint32_t buffer_size = LCD_H_RES * LCD_V_RES;
     lv_color_t *buf1 = (lv_color_t *)heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     lv_color_t *buf2 = (lv_color_t *)heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 
@@ -430,7 +428,7 @@ void lvgl_init_task(void *arg) {
         ESP_LOGE(TAG, "Failed to allocate LVGL draw buffers in PSRAM");
         abort();
     }
-    
+
     // Initialize LVGL Display
     lv_display_t *disp = lv_display_create(LCD_H_RES, LCD_V_RES);
     lv_display_set_buffers(disp, buf1, buf2, buffer_size * sizeof(lv_color_t), LV_DISPLAY_RENDER_MODE_FULL);

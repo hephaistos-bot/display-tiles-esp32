@@ -8,7 +8,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
-#include "esp_jpeg_dec.h" 
+#include "esp_jpeg_dec.h"
 
 #include <sys/stat.h>
 
@@ -75,7 +75,7 @@ static lv_result_t jpeg_esp_decoder_open(lv_image_decoder_t * decoder, lv_image_
                 // Fallback to PSRAM if internal is full, but it will be slower
                 jpeg_data = (uint8_t*)heap_caps_malloc(file_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
             }
-            
+
             if(!jpeg_data) {
                 fclose(f);
                 return LV_RESULT_INVALID;
@@ -86,7 +86,7 @@ static lv_result_t jpeg_esp_decoder_open(lv_image_decoder_t * decoder, lv_image_
 
             jpeg_dec_config_t config = DEFAULT_JPEG_DEC_CONFIG();
             config.output_type = JPEG_PIXEL_FORMAT_RGB565_LE;
-            
+
             jpeg_dec_handle_t jpeg_dec;
             jpeg_error_t jerr = jpeg_dec_open(&config, &jpeg_dec);
             if(jerr != JPEG_ERR_OK) {
@@ -300,7 +300,7 @@ void TileEngine::init() {
             lv_obj_set_style_border_width(img, 0, 0);
             lv_obj_set_style_outline_width(img, 0, 0);
             lv_obj_set_style_pad_all(img, 0, 0);
-            
+
             TileInfo info = {img, -1, -1, -1, ""};
             _tile_grid.push_back(info);
         }
@@ -310,7 +310,7 @@ void TileEngine::init() {
 void TileEngine::setMapCenter(double lat, double lon, int zoom) {
     _current_lat = lat;
     _current_lon = lon;
-    
+
     if (zoom < _min_zoom) zoom = _min_zoom;
     if (zoom > _max_zoom) zoom = _max_zoom;
     _current_zoom = zoom;
@@ -392,7 +392,7 @@ void TileEngine::event_handler(lv_event_t* e) {
                     if (zoomed) {
                         engine->_last_zoom_time = now;
                         // Reset layer pos so it doesn't jump during zoom
-                        lv_obj_set_pos(engine->_tile_layer, 0, 0); 
+                        lv_obj_set_pos(engine->_tile_layer, 0, 0);
                         engine->_base_tile_x = -1; // Force full refresh
                         engine->updateTiles(engine->_current_lat, engine->_current_lon, engine->_current_zoom);
                     }
@@ -482,7 +482,7 @@ void TileEngine::updateTiles(double lat, double lon, int zoom) {
 void TileEngine::loadConfig() {
     char base_path[128];
     snprintf(base_path, sizeof(base_path), "/sdcard%s", TILE_PATH_BASE_DIR);
-    
+
     DIR* dir = opendir(base_path);
     if (dir == NULL) {
         ESP_LOGW(TAG, "Could not open tiles directory: %s. Using defaults.", base_path);
