@@ -70,6 +70,13 @@ extern "C" {
     volatile bool measure_next_flush = false;
 }
 
+// Structure to hold multi-touch data for the TileEngine
+struct TouchUserData {
+    esp_lcd_touch_handle_t tp;
+    lv_point_t points[2];
+    uint8_t count;
+};
+
 void hardware_init(void);
 esp_err_t init_sd_card(void);
 void lvgl_init_task(void *arg);
@@ -85,20 +92,12 @@ void i2c_scan(void) {
 }
 
 extern "C" void app_main(void) {
-    esp_log_level_set("sdmmc_init", ESP_LOG_VERBOSE);
-    esp_log_level_set("sdmmc_cmd", ESP_LOG_VERBOSE);
-    esp_log_level_set("sdspi_host", ESP_LOG_VERBOSE);
-    esp_log_level_set("spi_master", ESP_LOG_VERBOSE);
-        // 1. Initialize core hardware (I2C, CH422G, LCD, Touch)
     hardware_init();
-
-    // 2. Setup LVGL Synchronization and Task
     lvgl_mux = xSemaphoreCreateRecursiveMutex();
     xTaskCreate(lvgl_init_task, "LVGL", 1024 * 16, NULL, 5, NULL);
 }
 
 void hardware_init(void) {
-    // Hardware needs time to settle after power-up
     ESP_LOGI(TAG, "Hardware stabilization (1.5s)...");
     vTaskDelay(pdMS_TO_TICKS(1500));
 
@@ -111,21 +110,17 @@ void hardware_init(void) {
     i2c_bus_conf.glitch_ignore_cnt = 7;
     i2c_bus_conf.flags.enable_internal_pullup = true;
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_conf, &i2c_bus));
-//test();
 
     // CH422G IO Expander Initialization
     ESP_LOGI(TAG, "Initializing CH422G...");
     ch422g_controller = new CH422GController(i2c_bus);
     ESP_ERROR_CHECK(ch422g_controller->init());
 
-    // Set known safe state: Backlight ON
+    // Ensure backlight is ON as soon as possible
     ESP_ERROR_CHECK(ch422g_controller->setBacklight(true));
 
     // --- GT911 Reset Sequence for Address 0x5D ---
-    // According to GT911 datasheet:
-    // To select address 0x5D: Reset=0, INT=0 (hold >100us) -> Reset=1 (hold >5ms)
     ESP_LOGI(TAG, "Performing GT911 Reset Sequence (Address 0x5D)...");
-
     gpio_config_t tp_int_conf = {};
     tp_int_conf.pin_bit_mask = (1ULL << TP_INT_PIN);
     tp_int_conf.mode = GPIO_MODE_OUTPUT;
@@ -136,19 +131,18 @@ void hardware_init(void) {
     // 1. Hold Reset Low, Hold INT Low
     ESP_ERROR_CHECK(gpio_set_level((gpio_num_t)TP_INT_PIN, 0));
     ESP_ERROR_CHECK(ch422g_controller->setTouchReset(true)); // Active LOW
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(pdMS_TO_TICKS(20));
 
     // 2. Release Reset, Keep INT Low
     ESP_ERROR_CHECK(ch422g_controller->setTouchReset(false)); // Release
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(pdMS_TO_TICKS(20));
 
     // 3. Set INT back to Input
     tp_int_conf.mode = GPIO_MODE_INPUT;
     tp_int_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     ESP_ERROR_CHECK(gpio_config(&tp_int_conf));
-    vTaskDelay(pdMS_TO_TICKS(200));
+    vTaskDelay(pdMS_TO_TICKS(100));
 
-    // Diagnostics
     i2c_scan();
 
     // RGB LCD Initialization
@@ -185,42 +179,9 @@ void hardware_init(void) {
     ESP_ERROR_CHECK(esp_lcd_new_rgb_panel(&panel_conf, &lcd_panel));
     ESP_ERROR_CHECK(esp_lcd_panel_reset(lcd_panel));
     ESP_ERROR_CHECK(esp_lcd_panel_init(lcd_panel));
-    ESP_LOGI(TAG, "LCD RGB panel initialized successfully.");
 
     // GT911 Initialization
     uint16_t tp_addr = 0x5D;
-    uint8_t prod_id[4] = {0};
-    esp_lcd_panel_io_i2c_config_t probe_io_conf = {};
-    probe_io_conf.dev_addr = 0x5D;
-    probe_io_conf.control_phase_bytes = 1;
-    probe_io_conf.lcd_cmd_bits = 16;
-    probe_io_conf.flags.disable_control_phase = 1;
-    probe_io_conf.scl_speed_hz = 400000;
-
-    esp_lcd_panel_io_handle_t probe_io = NULL;
-
-    ESP_LOGI(TAG, "Probing GT911...");
-    if (esp_lcd_new_panel_io_i2c(i2c_bus, &probe_io_conf, &probe_io) == ESP_OK) {
-        if (esp_lcd_panel_io_rx_param(probe_io, 0x8140, prod_id, 3) == ESP_OK) {
-            ESP_LOGI(TAG, "GT911 detected at 0x5D. ID: %c%c%c", prod_id[0], prod_id[1], prod_id[2]);
-            tp_addr = 0x5D;
-        } else {
-            ESP_LOGW(TAG, "GT911 not at 0x5D, trying 0x14...");
-            probe_io_conf.dev_addr = 0x14;
-            esp_lcd_panel_io_del(probe_io);
-            if (esp_lcd_new_panel_io_i2c(i2c_bus, &probe_io_conf, &probe_io) == ESP_OK) {
-                if (esp_lcd_panel_io_rx_param(probe_io, 0x8140, prod_id, 3) == ESP_OK) {
-                    ESP_LOGI(TAG, "GT911 detected at 0x14. ID: %c%c%c", prod_id[0], prod_id[1], prod_id[2]);
-                    tp_addr = 0x14;
-                } else {
-                    ESP_LOGE(TAG, "GT911 not detected!");
-                }
-            }
-        }
-        if (probe_io) esp_lcd_panel_io_del(probe_io);
-    }
-
-    ESP_LOGI(TAG, "Initializing GT911 driver at 0x%02X...", tp_addr);
     esp_lcd_panel_io_i2c_config_t tp_io_config = {};
     tp_io_config.dev_addr = tp_addr;
     tp_io_config.scl_speed_hz = 400000;
@@ -237,7 +198,7 @@ void hardware_init(void) {
     esp_lcd_touch_config_t tp_cfg = {};
     tp_cfg.x_max = LCD_H_RES;
     tp_cfg.y_max = LCD_V_RES;
-    tp_cfg.rst_gpio_num = (gpio_num_t)-1; // Managed via CH422G
+    tp_cfg.rst_gpio_num = (gpio_num_t)-1; 
     tp_cfg.int_gpio_num = (gpio_num_t)TP_INT_PIN;
     tp_cfg.levels.reset = 0;
     tp_cfg.levels.interrupt = 0;
@@ -247,46 +208,22 @@ void hardware_init(void) {
     tp_cfg.driver_data = &gt911_dev_conf;
 
     ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_gt911(tp_io_handle, &tp_cfg, &tp_handle));
-    ESP_LOGI(TAG, "Touch controller initialized successfully.");
 
    // SD Card Initialization
     esp_err_t ret = init_sd_card();
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to mount SD card (%s). Continuing without tiles.", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to mount SD card (%s).", esp_err_to_name(ret));
     }
 }
 
 esp_err_t init_sd_card(void) {
-    ESP_LOGI(TAG, "Starting manual SD wake-up sequence...");
+    ESP_LOGI(TAG, "Initializing SD card...");
 
     esp_vfs_fat_sdmmc_mount_config_t mount_config = {};
     mount_config.format_if_mount_failed = false;
     mount_config.max_files = 5;
     mount_config.allocation_unit_size = 16 * 1024;
 
-    // 1. S'assurer que le CS est HAUT (Désélectionné)
-    ch422g_controller->setSDCardSelected(false);
-    vTaskDelay(pdMS_TO_TICKS(50));
-
-    // 2. Générer des pulses d'horloge manuels (Dummy Clocks)
-    // On configure temporairement la pin SCK en GPIO pour "secouer" la carte
-    gpio_config_t sck_conf = {};
-    sck_conf.pin_bit_mask = (1ULL << SD_SCK_PIN);
-    sck_conf.mode = GPIO_MODE_OUTPUT;
-    ESP_ERROR_CHECK(gpio_config(&sck_conf));
-
-    for (int i = 0; i < 100; i++) {
-        gpio_set_level((gpio_num_t)SD_SCK_PIN, 0);
-        esp_rom_delay_us(10);
-        gpio_set_level((gpio_num_t)SD_SCK_PIN, 1);
-        esp_rom_delay_us(10);
-    }
-    ESP_LOGI(TAG, "Sent 100 dummy clocks.");
-
-    // 3. On remet la pin SCK pour le SPI
-    // (Le driver spi_bus_initialize s'en chargera, mais on libère la main)
-
-    // 4. Configuration SPI standard
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
     host.max_freq_khz = 40000;
 
@@ -301,16 +238,14 @@ esp_err_t init_sd_card(void) {
     if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) return ret;
 
     sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
-    slot_config.gpio_cs = (gpio_num_t)-1;
+    slot_config.gpio_cs = (gpio_num_t)-1; 
     slot_config.host_id = (spi_host_device_t)host.slot;
 
-    // 5. ACTIVER LE CS juste avant l'appel (L'instant T)
     ch422g_controller->setSDCardSelected(true);
-    vTaskDelay(pdMS_TO_TICKS(100)); // On laisse la tension se stabiliser
+    vTaskDelay(pdMS_TO_TICKS(100));
 
     ret = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_config, &mount_config, &card);
 
-    // Si ça échoue, on relâche le CS
     if (ret != ESP_OK) {
         ch422g_controller->setSDCardSelected(false);
     }
@@ -318,123 +253,29 @@ esp_err_t init_sd_card(void) {
     return ret;
 }
 
-// LVGL Flush Callback
 void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
     esp_lcd_panel_draw_bitmap(lcd_panel, area->x1, area->y1, area->x2 + 1, area->y2 + 1, px_map);
     lv_display_flush_ready(disp);
-
-    if (measure_next_flush && lv_display_flush_is_last(disp)) {
-        int64_t end_time = esp_timer_get_time();
-        ESP_LOGI("TIMING", "TOTAL SCREEN UPDATE TIME: %lld us", (end_time - update_start_time));
-        measure_next_flush = false;
-    }
 }
 
-// LVGL Tick Callback
-static uint32_t lvgl_tick_cb(void) {
+static uint32_t lv_tick_cb(void) {
     return esp_timer_get_time() / 1000;
 }
 
-// Structure to hold multi-touch data for the TileEngine
-struct TouchUserData {
-    esp_lcd_touch_handle_t tp;
-    lv_point_t points[2];
-    uint8_t count;
-};
-
-// LVGL Touch Read Callback
-static void lvgl_touch_read_cb(lv_indev_t * indev, lv_indev_data_t * data) {
-    TouchUserData * user_data = (TouchUserData *)lv_indev_get_user_data(indev);
-    if (!user_data || !user_data->tp) {
-        data->state = LV_INDEV_STATE_RELEASED;
-        return;
-    }
-
-    uint8_t point_cnt = 0;
-    esp_lcd_touch_point_data_t pts[2];
-
-    if (esp_lcd_touch_read_data(user_data->tp) == ESP_OK) {
-        if (esp_lcd_touch_get_data(user_data->tp, pts, &point_cnt, 2) == ESP_OK && point_cnt > 0) {
-            user_data->count = point_cnt;
-            user_data->points[0].x = pts[0].x;
-            user_data->points[0].y = pts[0].y;
-
-            data->point.x = pts[0].x;
-            data->point.y = pts[0].y;
-            data->state = LV_INDEV_STATE_PRESSED;
-
-            if (point_cnt > 1) {
-                user_data->points[1].x = pts[1].x;
-                user_data->points[1].y = pts[1].y;
-            }
-            return;
-        }
-    }
-    user_data->count = 0;
-    data->state = LV_INDEV_STATE_RELEASED;
-}
-
-static void btn_event_cb(lv_event_t * e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    if(code == LV_EVENT_CLICKED) {
-        ESP_LOGI(TAG, "Button clicked!");
-    }
-}
-
-void mytest() {
-    // Create a simple UI: "Hello World" with a button to test touch
-    lv_obj_t *label = lv_label_create(lv_screen_active());
-    lv_label_set_text(label, "Hello World from ESP32-S3!");
-    lv_obj_set_style_text_font(label, &lv_font_montserrat_20, 0);
-    lv_obj_align(label, LV_ALIGN_CENTER, 0, -40);
-    lv_obj_set_style_text_color(label, lv_palette_main(LV_PALETTE_BLUE), 0);
-
-    lv_obj_t * btn = lv_button_create(lv_screen_active());
-    lv_obj_align(btn, LV_ALIGN_CENTER, 0, 40);
-    lv_obj_add_event_cb(btn, btn_event_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t * btn_label = lv_label_create(btn);
-    lv_label_set_text(btn_label, "Touch Me");
-    lv_obj_center(btn_label);
-
-    ESP_LOGI(TAG, "LVGL initialization complete. Entering main loop...");
-
-    // Periodic LVGL Task execution
-    while (1) {
-        xSemaphoreTakeRecursive(lvgl_mux, portMAX_DELAY);
-        uint32_t time_till_next = lv_timer_handler();
-        xSemaphoreGiveRecursive(lvgl_mux);
-
-        if (time_till_next < 1) {
-            time_till_next = 1;
-        }
-        vTaskDelay(pdMS_TO_TICKS(time_till_next));
-    }
-}
-
 void lvgl_init_task(void *arg) {
-    ESP_LOGI(TAG, "Starting LVGL task...");
     lv_init();
-    lv_tick_set_cb(lvgl_tick_cb);
+    lv_tick_set_cb(lv_tick_cb);
 
-    // Resize image cache (4MB in PSRAM)
     lv_image_cache_resize(4 * 1024 * 1024, false);
 
-    // Use full framebuffers in PSRAM for smooth double-buffering
     uint32_t buffer_size = LCD_H_RES * LCD_V_RES;
     lv_color_t *buf1 = (lv_color_t *)heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     lv_color_t *buf2 = (lv_color_t *)heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 
-    if (!buf1 || !buf2) {
-        ESP_LOGE(TAG, "Failed to allocate LVGL draw buffers in PSRAM");
-        abort();
-    }
-
-    // Initialize LVGL Display
     lv_display_t *disp = lv_display_create(LCD_H_RES, LCD_V_RES);
     lv_display_set_buffers(disp, buf1, buf2, buffer_size * sizeof(lv_color_t), LV_DISPLAY_RENDER_MODE_FULL);
     lv_display_set_flush_cb(disp, lvgl_flush_cb);
 
-    // Register Touch Input Device
     if (tp_handle) {
         static TouchUserData touch_user_data;
         touch_user_data.tp = tp_handle;
@@ -443,26 +284,41 @@ void lvgl_init_task(void *arg) {
         lv_indev_t * indev = lv_indev_create();
         lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
         lv_indev_set_user_data(indev, &touch_user_data);
-        lv_indev_set_read_cb(indev, lvgl_touch_read_cb);
+        lv_indev_set_read_cb(indev, [](lv_indev_t * indev, lv_indev_data_t * data){
+            TouchUserData * user_data = (TouchUserData *)lv_indev_get_user_data(indev);
+            uint8_t point_cnt = 0;
+            esp_lcd_touch_point_data_t pts[2];
+            if (esp_lcd_touch_read_data(user_data->tp) == ESP_OK) {
+                if (esp_lcd_touch_get_data(user_data->tp, pts, &point_cnt, 2) == ESP_OK && point_cnt > 0) {
+                    user_data->count = point_cnt;
+                    data->point.x = pts[0].x;
+                    data->point.y = pts[0].y;
+                    data->state = LV_INDEV_STATE_PRESSED;
+                    return;
+                }
+            }
+            user_data->count = 0;
+            data->state = LV_INDEV_STATE_RELEASED;
+        });
     }
 
-    // Initialize Tile Engine
     static TileEngine engine;
     engine.init();
-
-    engine.setMapCenter(/*lat=*/-25.0, /*lon=*/25.0, /*zoom=*/8);
+    
+    // Protection: only set map center if SD card is mounted, 
+    // otherwise TileEngine crashes in updateTiles -> f_open
+    if (card != nullptr) {
+        engine.setMapCenter(/*lat=*/-25.0, /*lon=*/25.0, /*zoom=*/8);
+    } else {
+        ESP_LOGE(TAG, "SD card not available, skipping map initialization to avoid crash.");
+    }
 
     ESP_LOGI(TAG, "LVGL initialization complete. Entering main loop...");
 
-    // Periodic LVGL Task execution
     while (1) {
         xSemaphoreTakeRecursive(lvgl_mux, portMAX_DELAY);
         uint32_t time_till_next = lv_timer_handler();
         xSemaphoreGiveRecursive(lvgl_mux);
-
-        if (time_till_next < 1) {
-            time_till_next = 1;
-        }
-        vTaskDelay(pdMS_TO_TICKS(time_till_next));
+        vTaskDelay(pdMS_TO_TICKS(time_till_next > 0 ? time_till_next : 1));
     }
 }
