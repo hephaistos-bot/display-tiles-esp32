@@ -95,3 +95,12 @@ The ESP32-S3 supports hardware-accelerated JPEG decoding via SIMD instructions. 
 * **Memory:** Always allocate LVGL frame buffers and large image buffers in PSRAM using `MALLOC_CAP_SPIRAM`.
 * **I2C Conflicts:** SDA/SCL are on GPIO 8/9. Avoid using these for RGB data.
 * **CH422G Communication:** The chip requires the system configuration command (address `0x24`) to be sent once with value `0x01` to enable IO operations.
+
+## 6. Development & Coding Standards
+
+### Testing
+* **Build Verification:** All changes **must** be tested by compiling the project using the command `idf.py build`. Ensure the project compiles without errors before considering a task complete.
+
+### Formatting & Style
+* **No Trailing Spaces:** Modified or added lines must **never** end with a space.
+* **Indentation:** Use **2 spaces** for tabs/indentation for all new or modified code, regardless of the existing indentation style in the file.
