@@ -26,7 +26,7 @@ public:
     CH422GController(i2c_master_bus_handle_t bus_handle,
                      uint8_t addr_config = DEFAULT_ADDR_CONFIG,
                      uint8_t addr_rd_io  = DEFAULT_ADDR_RD_IO,
-                     uint8_t addr_io      = DEFAULT_ADDR_IO);
+                     uint8_t addr_io     = DEFAULT_ADDR_IO);
 
     ~CH422GController();
 

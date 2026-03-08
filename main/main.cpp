@@ -115,6 +115,7 @@ void hardware_init(void) {
     ESP_LOGI(TAG, "Initializing CH422G...");
     ch422g_controller = new CH422GController(i2c_bus);
     ESP_ERROR_CHECK(ch422g_controller->init());
+    ESP_ERROR_CHECK(ch422g_controller->setIOOutputEnable(true));
 
     // Ensure backlight is ON as soon as possible
     ESP_ERROR_CHECK(ch422g_controller->setBacklight(true));
